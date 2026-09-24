@@ -1,7 +1,9 @@
 # Waypoint 路书
 
 A single-file road-trip planner for comparing multi-stop routes and discussing them with friends.
-Open `index.html` in a browser, or host it on GitHub Pages. No build step, no backend.
+No build step, no backend.
+
+**Live:** https://springlock233-source.github.io/waypoint/ (GitHub Pages, updates on every push to `main`). Or open `index.html` locally.
 
 Sample data: a 7-day National Day self-drive trip from Changsha through southern Hunan and northern Guangxi (1–7 Oct 2026).
 

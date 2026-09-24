@@ -849,7 +849,7 @@ function openSettings(){
   const root=document.getElementById('modal-root');
   root.innerHTML=`<div class="modal-bg" data-close><form class="modal" id="settings-form">
     <h3>设置</h3>
-    <label class="field"><span>高德 Web服务 Key（可选）</span><input id="st-key" value="${esc(settings.amapKey)}" placeholder="粘贴后底图、路线和搜索改用高德" autocomplete="off" spellcheck="false"></label>
+    <div class="field"><span>高德 Web服务 Key（可选）</span><div class="row" style="flex-wrap:nowrap"><input id="st-key" style="flex:1" value="${esc(settings.amapKey)}" placeholder="粘贴后底图、路线和搜索改用高德" autocomplete="off" spellcheck="false"><button type="button" class="btn" id="st-test">测试</button></div><span class="hint" id="st-test-out"></span></div>
     <label class="field"><span>地图数据源</span><select id="st-prov"><option value="auto" ${settings.provider!=='osm'?'selected':''}>自动：有 Key 用高德，否则 OpenStreetMap + OSRM</option><option value="osm" ${settings.provider==='osm'?'selected':''}>始终用 OpenStreetMap + OSRM</option></select></label>
     <label class="field"><span>驾车每公里成本（油费等，¥/km）</span><input id="st-km" type="number" min="0" step="0.1" value="${state.costPerKm??0.7}"></label>
     <p class="hint" style="margin:0">当前数据源：${esc(provider().name)}。Key 只存在这台浏览器里，不会随导出的 JSON 分享。行程会自动保存在本浏览器；要给朋友看，用顶栏「导出」发文件，对方用「导入」打开。</p>
@@ -857,6 +857,12 @@ function openSettings(){
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>取消</button><button type="submit" class="btn primary">保存</button></div>
   </form></div>`;
   root.querySelectorAll('[data-close]').forEach(b=>b.onclick=e=>{ if(e.target===b) root.innerHTML=''; });
+  root.querySelector('#st-test').onclick=async()=>{ const key=root.querySelector('#st-key').value.trim(), out=root.querySelector('#st-test-out');
+    if(!key){ out.textContent='先粘贴 Key 再测试'; return; } out.textContent='测试中…';
+    const WHY={'10001':'Key 无效，检查是否复制完整','10009':'Key 类型不对：要在控制台新建一个「Web服务」类型的 Key，不是 Web端(JS API)','10003':'今日配额已用完','10005':'IP 不在白名单里，把 Key 的 IP 白名单清空'};
+    try{ const j=await (await fetch(`https://restapi.amap.com/v3/geocode/geo?key=${encodeURIComponent(key)}&address=${encodeURIComponent('长沙市')}`)).json();
+      out.textContent=j.status==='1'?'✓ Key 可用，保存后地图、路线、搜索改用高德':`✕ ${WHY[j.infocode]||j.info||'失败'}（${j.infocode||''}）`; }
+    catch(e){ out.textContent='✕ 请求失败，检查网络：'+(e.message||''); } };
   root.querySelector('#st-reroute').onclick=()=>{ clearRoutes(); root.innerHTML=''; toast('正在重新计算路线'); render(); };
   root.querySelector('#st-reset').onclick=()=>{ if(!confirm('确定丢弃当前行程，恢复示例？')) return; state=sampleState(); root.innerHTML=''; render(); saveNow(); };
   root.querySelector('#settings-form').onsubmit=e=>{ e.preventDefault();

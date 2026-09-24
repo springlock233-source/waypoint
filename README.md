@@ -9,7 +9,7 @@ Sample data: a 7-day National Day self-drive trip from Changsha through southern
 
 ## Views (keys 1–4)
 
-1. **路线树 Route Tree** – a mind-map of possible routes branching from the origin. Click a node to make the path from the root to that node the active plan. The side panel compares every complete route by nights, travel time, km, chosen / TBD attractions and budget.
+1. **路线树 Route Tree** – a mind-map of possible routes branching from the origin. Click a node to make the path from the root to that node the active plan. The side panel compares every complete route by nights, travel time, km, chosen / TBD attractions and budget. Branches can also **merge**: "＋ 分支 → 汇入已有站点" connects a stop to an existing later stop, so everything after it is shared instead of duplicated. Each incoming connection keeps its own travel mode and time, and every distinct start-to-end path still appears in the comparison.
 2. **行程与地图 Itinerary & Map** – the active plan's stops and legs, a real map (Leaflet) with the routed roads drawn on it, and a per-stop time and money summary.
 3. **站点景点 Stop Detail** – attraction cards for one stop with photo upload, hours, ticket price and a go / TBD / skip decision. Hotel per night and food per day live in the side panel.
 4. **总结导出 Summary** – a print-styled itinerary sheet with a budget breakdown and a static map of the route (map tiles stitched on a canvas in the browser, so it prints as one image). "导出 PDF" calls the browser print dialog.
@@ -38,11 +38,14 @@ Getting a key: [console.amap.com](https://console.amap.com) → 应用管理 →
 ```js
 state = {
   title, view, startDate, costPerKm,
-  rootId, activeLeafId, currentPlaceId,
+  rootId, activePath: [nodeIds], currentPlaceId,
   places: { [id]: { id, name, lat, lng, days, note, hotel, food,
                     attractions: [{ id, name, desc, hours, ticket, decision: 'go'|'tbd'|'skip', img }] } },
-  nodes:  { [id]: { id, placeId, parentId, mode, minutes /* null = routed */, children: [ids] } }
+  nodes:  { [id]: { id, placeId,
+                    parents: { [parentNodeId]: { mode, minutes /* null = routed */ } },   // several = merged branches
+                    parentId,        // which parent the node hangs under in the tree layout
+                    children: [ids] } }
 }
 ```
 
-A place can appear in several tree nodes, so attractions and decisions are shared across branches.
+The route graph is a DAG: a node may have several parents (merged branches), and the active plan is an explicit path of node ids. Files saved in the older single-parent format (`parentId`/`mode`/`minutes` on the node, `activeLeafId`) are migrated on load. A place can appear in several nodes, so attractions and decisions are shared across branches.

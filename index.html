@@ -104,6 +104,9 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 .tnode .check{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-size:11px;color:transparent}
 .tnode.on .check{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .tnode .tn-edge{display:flex;gap:6px;margin-top:8px}
+.tnode .tn-from{font-size:11px;color:var(--muted);margin-top:6px;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tnode .tn-from+.tn-edge{margin-top:2px}
+.tnode .tn-edge .btn{padding:2px 5px}
 .tnode .tn-edge select,.tnode .tn-edge input{padding:3px 6px;font-size:12px;border-radius:5px}
 .tnode .tn-edge input{width:64px}
 .tnode .tn-foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:6px}
@@ -383,7 +386,9 @@ function sampleState(){
 
   const nodes = {};
   // minutes 留空 = 用路线服务算出的时间；在任一条边上填数字即可手动覆盖
-  const N = (placeId,parentId,mode='drive')=>{ const n={id:uid('n'),placeId,parentId,mode,minutes:null,children:[]}; nodes[n.id]=n; if(parentId) nodes[parentId].children.push(n.id); return n; };
+  // 一个站点可以有多个「前一站」（分支汇合）：parents[前一站 id] = {mode, minutes}；parentId 是排版时挂在哪个前一站下面
+  const N = (placeId,parentId,mode='drive')=>{ const n={id:uid('n'),placeId,parentId,parents:parentId?{[parentId]:{mode,minutes:null}}:{},children:[]}; nodes[n.id]=n; if(parentId) nodes[parentId].children.push(n.id); return n; };
+  const LINK = (parentId,childId,mode='drive')=>{ nodes[childId].parents[parentId]={mode,minutes:null}; nodes[parentId].children.push(childId); };
   const root = N(changsha.id,null);
   // 主方案：郴州 → 贺州 → 黄姚 → 金秀 → 猫儿山 → 长沙
   const a1 = N(dongjiang.id,root.id);
@@ -395,13 +400,9 @@ function sampleState(){
   // D6 替代：金秀 → 兴坪 → 长沙
   const b5 = N(xingping.id,a4.id);
   const b6 = N(back.id,b5.id);
-  // D1 替代：走永州直奔贺州
+  // D1 替代：走永州直奔贺州，然后汇入主方案的姑婆山——之后的站点共用，不用复制一遍
   const c1 = N(yongzhou.id,root.id);
-  const c2 = N(gupo.id,c1.id);
-  const c3 = N(huangyao.id,c2.id);
-  const c4 = N(jinxiu.id,c3.id);
-  const c5 = N(maoer.id,c4.id);
-  const c6 = N(back.id,c5.id);
+  LINK(c1.id,a2.id);
   // 最早那版：崀山 → 龙脊 → 兴坪 → 黄姚 → 长沙
   const d1 = N(langshan.id,root.id);
   const d2 = N(longji.id,d1.id);
@@ -409,7 +410,7 @@ function sampleState(){
   const d4 = N(huangyao.id,d3.id);
   const d5 = N(back.id,d4.id);
 
-  return { title:'国庆 · 湘南桂北 7 天自驾', places, nodes, rootId:root.id, activeLeafId:a6.id, view:'tree', currentPlaceId:dongjiang.id, startDate:'2026-10-01', costPerKm:0.7 };
+  return { title:'国庆 · 湘南桂北 7 天自驾', places, nodes, rootId:root.id, activePath:[root.id,a1.id,a2.id,a3.id,a4.id,a5.id,a6.id], view:'tree', currentPlaceId:dongjiang.id, startDate:'2026-10-01', costPerKm:0.7 };
 }
 
 let state = sampleState();
@@ -478,14 +479,20 @@ const provider = () => PROVIDER[useAmap()?'amap':'osm'];
 /* ---- routed legs: cached per provider + mode + coordinates, persisted in IndexedDB ---- */
 const routeCache={};   // key -> {minutes,km,geo,tolls?} | 'pending' | 'error'
 const routeKey=(a,b,mode)=>`${useAmap()?'amap':'osm'}|${mode}|${a.lat},${a.lng}|${b.lat},${b.lng}`;
-function routeState(n){ if(!n.parentId||!provider().canRoute(n.mode)) return null; return routeCache[routeKey(place(node(n.parentId).placeId),place(n.placeId),n.mode)]||null; }
-function routed(n){ const r=routeState(n); return r&&typeof r==='object'?r:null; }
-function edgeSource(n){ return (n.minutes!=null&&n.minutes!=='')?'manual':routed(n)?'routed':'est'; }
+/* legs: a leg is one incoming connection of a node, {pid,cid,mode,minutes}. A node may have several (branches merge). */
+const legOf=(pid,cid)=>{ const c=node(cid), e=c&&c.parents&&c.parents[pid]; return e?{pid,cid,mode:e.mode||'drive',minutes:e.minutes}:null; };
+function allLegs(){ const out=[]; Object.values(state.nodes).forEach(c=>Object.keys(c.parents||{}).forEach(pid=>{ if(node(pid)) out.push(legOf(pid,c.id)); })); return out; }
+const pathLegs = ap => ap.map((id,i)=>i?legOf(ap[i-1],id):null);
+const legPlaces = l => [place(node(l.pid).placeId),place(node(l.cid).placeId)];
+const legRef = l => `${l.pid}>${l.cid}`;   // data-attribute id of a leg; parsed back by the change / click handlers
+function routeState(l){ if(!l||!provider().canRoute(l.mode)) return null; const [a,b]=legPlaces(l); return routeCache[routeKey(a,b,l.mode)]||null; }
+function routed(l){ const r=routeState(l); return r&&typeof r==='object'?r:null; }
+function edgeSource(l){ return (l.minutes!=null&&l.minutes!=='')?'manual':routed(l)?'routed':'est'; }
 const routeQueue=[]; let routing=false, routeRender=null, routeWarned=false;
 function requestRoutes(){   // called after every render; queues any routable edge not yet in the cache
-  Object.values(state.nodes).forEach(n=>{ if(!n.parentId||!provider().canRoute(n.mode)) return;
-    const a=place(node(n.parentId).placeId), b=place(n.placeId), k=routeKey(a,b,n.mode);
-    if(routeCache[k]) return; routeCache[k]='pending'; routeQueue.push({k,a,b,mode:n.mode}); });
+  allLegs().forEach(l=>{ if(!provider().canRoute(l.mode)) return;
+    const [a,b]=legPlaces(l), k=routeKey(a,b,l.mode);
+    if(routeCache[k]) return; routeCache[k]='pending'; routeQueue.push({k,a,b,mode:l.mode}); });
   if(!routing&&routeQueue.length) drainRoutes();
 }
 async function drainRoutes(){ routing=true;
@@ -499,34 +506,45 @@ async function drainRoutes(){ routing=true;
 }
 function saveRoutes(){ const keep={}; Object.entries(routeCache).forEach(([k,v])=>{ if(v&&typeof v==='object') keep[k]=v; }); DB.set('routes',keep).catch(()=>{}); }
 function clearRoutes(){ Object.keys(routeCache).forEach(k=>delete routeCache[k]); routeWarned=false; DB.set('routes',{}).catch(()=>{}); }
-function autoMinutes(n){ const r=routed(n); return r?r.minutes:estMinutes(place(node(n.parentId).placeId),place(n.placeId),n.mode); }
-function edgeMinutes(n){
-  if(!n.parentId) return 0;
-  if(n.minutes!=null && n.minutes!=='') return Number(n.minutes);
-  return autoMinutes(n);
+function autoMinutes(l){ const r=routed(l); if(r) return r.minutes; const [a,b]=legPlaces(l); return estMinutes(a,b,l.mode); }
+function edgeMinutes(l){
+  if(!l) return 0;
+  if(l.minutes!=null && l.minutes!=='') return Number(l.minutes);
+  return autoMinutes(l);
 }
-function edgeKm(n){ if(!n.parentId) return 0; const r=routed(n); return r?r.km:estKm(place(node(n.parentId).placeId),place(n.placeId),n.mode); }
-function legSourceText(n){ const s=edgeSource(n), r=routed(n), km=edgeKm(n), src=useAmap()?'高德路线':'公路路线', toll=r?.tolls?` · 过路费 ¥${r.tolls}`:'';
-  if(s==='manual') return `手动 ${fmtMin(edgeMinutes(n))} · ${km} km${r?` · ${src}约 ${fmtMin(r.minutes)} <button type="button" class="btn small ghost" data-auto="${n.id}">改用路线时间</button>`:''}`;
+function edgeKm(l){ if(!l) return 0; const r=routed(l); if(r) return r.km; const [a,b]=legPlaces(l); return estKm(a,b,l.mode); }
+function legSourceText(l){ const s=edgeSource(l), r=routed(l), km=edgeKm(l), src=useAmap()?'高德路线':'公路路线', toll=r?.tolls?` · 过路费 ¥${r.tolls}`:'';
+  if(s==='manual') return `手动 ${fmtMin(edgeMinutes(l))} · ${km} km${r?` · ${src}约 ${fmtMin(r.minutes)} <button type="button" class="btn small ghost" data-auto="${legRef(l)}">改用路线时间</button>`:''}`;
   if(s==='routed') return `${src} ${fmtMin(r.minutes)} · ${km} km${toll}`;
-  return `${routeState(n)==='pending'?'路线计算中…':'直线估算*'} ${fmtMin(edgeMinutes(n))} · 约 ${km} km`;
+  return `${routeState(l)==='pending'?'路线计算中…':'直线估算*'} ${fmtMin(edgeMinutes(l))} · 约 ${km} km`;
 }
 function fmtMin(m){ m=Math.round(m); const h=Math.floor(m/60), mm=m%60; return h? `${h}h${mm?String(mm).padStart(2,'0'):''}` : `${mm}min`; }
-function pathTo(id){ const p=[]; let n=node(id); while(n){ p.unshift(n.id); n=n.parentId?node(n.parentId):null; } return p; }
-const activePath = () => pathTo(state.activeLeafId);
-function leaves(){ return Object.values(state.nodes).filter(n=>!n.children.length).map(n=>n.id); }
+
+/* ---- the route graph: every node except the root has one or more parents; the active plan is an explicit path of node ids ---- */
+const activePath = () => state.activePath;
+function ancestors(id){ const seen=new Set(), st=[id]; while(st.length){ const x=st.pop(); Object.keys(node(x)?.parents||{}).forEach(p=>{ if(!seen.has(p)){ seen.add(p); st.push(p); } }); } return seen; }
+function pathTo(id){   // root -> id; at a merge, prefer the parent that is already on the active path
+  const cur=new Set(state.activePath||[]), p=[]; let x=id, guard=0;
+  while(x&&node(x)&&guard++<1000){ p.unshift(x); if(x===state.rootId) break; const ps=Object.keys(node(x).parents||{}); x=ps.find(q=>cur.has(q))||node(x).parentId||ps[0]; }
+  return p;
+}
+function allPaths(){ const out=[]; (function dfs(id,acc){ acc=acc.concat(id); const n=node(id); if(!n.children.length) return out.push(acc); n.children.forEach(c=>dfs(c,acc)); })(state.rootId,[]); return out; }
+function layers(){ const L={}; (function d(id,l){ if((L[id]??-1)>=l) return; L[id]=l; node(id).children.forEach(c=>d(c,l+1)); })(state.rootId,0); return L; }   // tree column = longest path from the root
+function fixActivePath(){   // drop nodes that no longer exist or connect; a spliced-out stop is skipped because its parent now links straight to its child
+  const out=[state.rootId]; (state.activePath||[]).forEach(id=>{ if(id===state.rootId||!node(id)) return; if(node(id).parents?.[out[out.length-1]]) out.push(id); }); state.activePath=out;
+}
 function metrics(pathIds){
-  let travel=0,km=0,days=0,go=0,tbd=0,hours=0;
-  pathIds.forEach(id=>{ const n=node(id), p=place(n.placeId); travel+=edgeMinutes(n); km+=edgeKm(n); days+=Number(p.days)||0;
+  let travel=0,km=0,days=0,go=0,tbd=0,hours=0; const legs=pathLegs(pathIds);
+  pathIds.forEach((id,i)=>{ const p=place(node(id).placeId), l=legs[i]; if(l){ travel+=edgeMinutes(l); km+=edgeKm(l); } days+=Number(p.days)||0;
     p.attractions.forEach(a=>{ if(a.decision==='go'){go++;hours+=Number(a.hours)||0;} if(a.decision==='tbd') tbd++; }); });
   return {travel,km,days,go,tbd,hours,stops:pathIds.length-1};
 }
 /* ---- budget (¥): hotel × nights + food × days + tickets of chosen attractions; per route add driving km × cost/km and 高德 tolls ---- */
 function stopCost(p){ const nights=Number(p.days)||0; return (Number(p.hotel)||0)*nights+(Number(p.food)||0)*Math.ceil(nights)+p.attractions.reduce((s,a)=>s+(a.decision==='go'?Number(a.ticket)||0:0),0); }
 function costOf(pathIds){
-  const c={drive:0,tolls:0,hotel:0,food:0,tickets:0};
-  pathIds.forEach(id=>{ const n=node(id), p=place(n.placeId); const nights=Number(p.days)||0;
-    if(n.parentId&&n.mode==='drive'){ c.drive+=edgeKm(n)*(Number(state.costPerKm)||0); c.tolls+=routed(n)?.tolls||0; }
+  const c={drive:0,tolls:0,hotel:0,food:0,tickets:0}; const legs=pathLegs(pathIds);
+  pathIds.forEach((id,i)=>{ const p=place(node(id).placeId), l=legs[i]; const nights=Number(p.days)||0;
+    if(l&&l.mode==='drive'){ c.drive+=edgeKm(l)*(Number(state.costPerKm)||0); c.tolls+=routed(l)?.tolls||0; }
     c.hotel+=(Number(p.hotel)||0)*nights; c.food+=(Number(p.food)||0)*Math.ceil(nights);
     p.attractions.forEach(a=>{ if(a.decision==='go') c.tickets+=Number(a.ticket)||0; }); });
   c.total=c.drive+c.tolls+c.hotel+c.food+c.tickets; return c;
@@ -546,16 +564,22 @@ window.addEventListener('pagehide',saveNow);
 function migrate(s){   // fill in fields added after a file was saved
   s.costPerKm??=0.7; if(!['tree','plan','detail','summary'].includes(s.view)) s.view='tree';
   Object.values(s.places).forEach(p=>{ p.hotel??=0; p.food??=0; p.note??=''; p.attractions??=[]; p.attractions.forEach(a=>{ a.ticket??=0; a.img??=null; }); });
-  Object.values(s.nodes).forEach(n=>{ n.children??=[]; if(n.minutes===''||n.minutes===undefined) n.minutes=null; });
+  Object.values(s.nodes).forEach(n=>{ n.children??=[];
+    if(!n.parents){ n.parents={}; if(n.parentId) n.parents[n.parentId]={mode:n.mode||'drive',minutes:n.minutes}; delete n.mode; delete n.minutes; }   // pre-merge format: one parent, edge stored on the node
+    Object.values(n.parents).forEach(e=>{ e.mode??='drive'; if(e.minutes===''||e.minutes===undefined) e.minutes=null; });
+    if(n.parentId&&!n.parents[n.parentId]) n.parentId=Object.keys(n.parents)[0]||null; });
+  Object.values(s.nodes).forEach(n=>{ n.children=n.children.filter(c=>s.nodes[c]&&s.nodes[c].parents[n.id]); Object.keys(n.parents).forEach(pid=>{ if(!s.nodes[pid]) delete n.parents[pid]; else if(!s.nodes[pid].children.includes(n.id)) s.nodes[pid].children.push(n.id); }); });
+  if(!Array.isArray(s.activePath)){ const p=[]; let x=s.activeLeafId; while(x&&s.nodes[x]&&p.length<1000){ p.unshift(x); if(x===s.rootId) break; x=s.nodes[x].parentId; } s.activePath=p.length&&p[0]===s.rootId?p:[s.rootId]; }
+  delete s.activeLeafId;
   return s;
 }
 function exportJSON(){ const blob=new Blob([JSON.stringify(state,null,1)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`${(state.title||'waypoint').replace(/[\\\/:*?"<>|]/g,' ')}.json`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),3000); toast('已导出 JSON'); }
-function importJSON(file){ if(!file) return; const fr=new FileReader(); fr.onload=()=>{ try{ const d=JSON.parse(fr.result); if(!d.nodes||!d.places||!d.rootId||!d.nodes[d.rootId]) throw 0; state=migrate(d); if(!node(state.activeLeafId)) state.activeLeafId=state.rootId; toast('已导入行程'); render(); }catch(_){ toast('不是有效的 Waypoint JSON 文件'); } }; fr.readAsText(file); }
+function importJSON(file){ if(!file) return; const fr=new FileReader(); fr.onload=()=>{ try{ const d=JSON.parse(fr.result); if(!d.nodes||!d.places||!d.rootId||!d.nodes[d.rootId]) throw 0; state=migrate(d); fixActivePath(); toast('已导入行程'); render(); }catch(_){ toast('不是有效的 Waypoint JSON 文件'); } }; fr.readAsText(file); }
 
 function gmapsLink(pathIds){
   const pts=pathIds.map(id=>place(node(id).placeId)); if(pts.length<2) return `https://www.google.com/maps/search/?api=1&query=${pts[0].lat},${pts[0].lng}`;
   const o=pts[0], d=pts[pts.length-1], w=pts.slice(1,-1).map(p=>`${p.lat},${p.lng}`).join('|');
-  const modes=pathIds.slice(1).map(id=>node(id).mode); const tm = modes.every(m=>m==='walk')?'walking': modes.every(m=>['train','bus','boat'].includes(m))?'transit':'driving';
+  const modes=pathLegs(pathIds).slice(1).map(l=>l?l.mode:'drive'); const tm = modes.every(m=>m==='walk')?'walking': modes.every(m=>['train','bus','boat'].includes(m))?'transit':'driving';
   return `https://www.google.com/maps/dir/?api=1&origin=${o.lat},${o.lng}&destination=${d.lat},${d.lng}${w?`&waypoints=${encodeURIComponent(w)}`:''}&travelmode=${tm}`;
 }
 const amapLink = p => { const [lat,lng]=GCJ.fromWgs(p.lat,p.lng); return `https://uri.amap.com/marker?position=${lng.toFixed(6)},${lat.toFixed(6)}&name=${encodeURIComponent(p.name)}`; };   // 高德 expects GCJ-02
@@ -564,26 +588,38 @@ function decisionChip(d){ return d==='go'?'<span class="chip go">去</span>':d==
 function modeOptions(sel){ return Object.entries(MODES).map(([k,m])=>`<option value="${k}" ${k===sel?'selected':''}>${m.icon} ${m.label}</option>`).join(''); }
 let toastT; function toast(msg){ let t=document.querySelector('.toast'); if(!t){t=document.createElement('div');t.className='toast';document.body.appendChild(t);} t.textContent=msg; clearTimeout(toastT); toastT=setTimeout(()=>t.remove(),1800); }
 
-/* ============ mutations ============ */
-function addNode(parentId,placeId,mode='drive'){ const n={id:uid('n'),placeId,parentId,mode,minutes:null,children:[]}; state.nodes[n.id]=n; node(parentId).children.push(n.id); state.activeLeafId=n.id; return n; }
-function deleteSubtree(id){
-  const n=node(id); if(!n.parentId) return;
-  const all=[]; (function walk(x){ all.push(x); node(x).children.forEach(walk); })(id);
-  if(all.includes(state.activeLeafId)) state.activeLeafId=n.parentId;
-  const par=node(n.parentId); par.children=par.children.filter(c=>c!==id);
-  all.forEach(x=>delete state.nodes[x]);
+/* ============ mutations on the route graph ============ */
+function addNode(parentId,placeId,mode='drive'){ const n={id:uid('n'),placeId,parentId,parents:{[parentId]:{mode,minutes:null}},children:[]}; state.nodes[n.id]=n; node(parentId).children.push(n.id); state.activePath=pathTo(parentId).concat(n.id); return n; }
+function linkNode(parentId,childId,mode='drive'){   // merge: an existing stop becomes the next stop after parentId, so everything after it is shared
+  if(parentId===childId||childId===state.rootId||!node(parentId)||!node(childId)||node(childId).parents[parentId]||ancestors(parentId).has(childId)) return false;
+  node(childId).parents[parentId]={mode,minutes:null}; node(parentId).children.push(childId); state.activePath=pathTo(parentId).concat(childId); return true;
 }
-function spliceNode(id){ // remove one stop, keep what follows
-  const n=node(id); if(!n.parentId) return;
-  const par=node(n.parentId); const idx=par.children.indexOf(id);
-  par.children.splice(idx,1,...n.children); n.children.forEach(c=>node(c).parentId=par.id);
-  if(state.activeLeafId===id) state.activeLeafId=par.id;
-  delete state.nodes[id];
+function detachChild(id,cid){   // remove the connection id->cid; the child is deleted only if that was its last parent
+  const c=node(cid); if(!c) return; delete c.parents[id]; const rest=Object.keys(c.parents);
+  if(!rest.length){ c.parentId=null; deleteNode(cid); } else if(c.parentId===id) c.parentId=rest[0];
+}
+function deleteNode(id){   // remove a stop and its connections; stops after it survive when another branch still reaches them
+  if(id===state.rootId) return; const n=node(id); if(!n) return;
+  Object.keys(n.parents).forEach(pid=>{ const p=node(pid); if(p) p.children=p.children.filter(c=>c!==id); });
+  n.children.slice().forEach(cid=>detachChild(id,cid));
+  delete state.nodes[id]; fixActivePath();
+}
+function unlink(pid,cid){   // cut one incoming connection of a merged stop
+  const c=node(cid); if(!c||!c.parents[pid]) return; if(Object.keys(c.parents).length<=1) return deleteNode(cid);
+  node(pid).children=node(pid).children.filter(x=>x!==cid); detachChild(pid,cid); fixActivePath();
+}
+function spliceNode(id){   // remove one stop but keep what follows: every parent gets connected to every child
+  if(id===state.rootId) return; const n=node(id); if(!n) return; const parents=Object.keys(n.parents), kids=n.children.slice();
+  parents.forEach(pid=>{ const p=node(pid); if(!p) return; p.children=p.children.filter(c=>c!==id);
+    kids.forEach(cid=>{ const c=node(cid); if(c&&!c.parents[pid]&&!ancestors(pid).has(cid)){ c.parents[pid]={mode:c.parents[id]?.mode||'drive',minutes:null}; p.children.push(cid); } }); });
+  kids.forEach(cid=>detachChild(id,cid));
+  delete state.nodes[id]; fixActivePath();
 }
 function createPlace(name,lat,lng,days){ const p={id:uid('p'),name,lat:Number(lat),lng:Number(lng),days:Number(days)||1,note:'',hotel:0,food:0,attractions:[]}; state.places[p.id]=p; return p; }
 
 /* ============ render ============ */
 function render(quiet){   // quiet: re-render in place (routed times arrived) without jumping to the top
+  fixActivePath();
   document.getElementById('trip-title').value=state.title;
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view===state.view));
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+state.view));
@@ -597,41 +633,43 @@ function render(quiet){   // quiet: re-render in place (routed times arrived) wi
 
 /* ---- 1. tree ---- */
 function renderTree(){
-  const COLW=290, ROWH=150, W=210, H=112;
+  const lay=layers(), maxIn=Math.max(1,...Object.values(state.nodes).map(n=>Object.keys(n.parents||{}).length));
+  const COLW=290, W=210, H=maxIn>1?76+50*maxIn:112, ROWH=H+38;   // row spacing fits the tallest box; each box is sized by its own number of incoming connections
+  const hOf=id=>{ const k=Object.keys(node(id).parents||{}).length; return k>1?76+50*k:112; };
   const pos={}; let row=0, maxD=0;
-  (function dfs(id,d){ const n=node(id); maxD=Math.max(maxD,d);
-    if(!n.children.length){ pos[id]={x:d,y:row++}; return pos[id].y; }
-    const ys=n.children.map(c=>dfs(c,d+1)); pos[id]={x:d,y:(Math.min(...ys)+Math.max(...ys))/2}; return pos[id].y; })(state.rootId,0);
-  const ap=new Set(activePath());
+  (function dfs(id){ const n=node(id), kids=n.children.filter(c=>node(c).parentId===id); maxD=Math.max(maxD,lay[id]);   // rows follow the layout parent; merge connections are drawn on top
+    if(!kids.length){ pos[id]={x:lay[id],y:row++}; return pos[id].y; }
+    const ys=kids.map(dfs); pos[id]={x:lay[id],y:(Math.min(...ys)+Math.max(...ys))/2}; return pos[id].y; })(state.rootId);
+  const apList=activePath(), ap=new Set(apList), apIdx={}; apList.forEach((id,i)=>apIdx[id]=i);
+  const onLeg=l=>apIdx[l.pid]!=null&&apIdx[l.cid]===apIdx[l.pid]+1;
   const cw=maxD*COLW+W+16, ch=(Math.max(row,1)-1)*ROWH+H+16;
   let svg='', boxes='';
+  allLegs().forEach(l=>{ const pp=pos[l.pid], cp=pos[l.cid]; if(!pp||!cp) return;
+    const x1=pp.x*COLW+W, y1=pp.y*ROWH+hOf(l.pid)/2, x2=cp.x*COLW, y2=cp.y*ROWH+hOf(l.cid)/2, mx=(x1+x2)/2;
+    svg+=`<path class="edge ${onLeg(l)?'on':''}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"/>`;
+    const lbl=`${MODES[l.mode].icon} ${fmtMin(edgeMinutes(l))}${edgeSource(l)==='est'?'*':''}`; const lw=lbl.length*7.5+14;
+    svg+=`<rect class="edge-bg" x="${mx-lw/2}" y="${(y1+y2)/2-11}" width="${lw}" height="22" rx="11"/><text class="edge-label" x="${mx}" y="${(y1+y2)/2+4}" text-anchor="middle">${esc(lbl)}</text>`; });
   Object.keys(pos).forEach(id=>{
-    const n=node(id), p=place(n.placeId), x=pos[id].x*COLW, y=pos[id].y*ROWH, on=ap.has(id);
-    if(n.parentId){
-      const pp=pos[n.parentId], x1=pp.x*COLW+W, y1=pp.y*ROWH+H/2, x2=x, y2=y+H/2, mx=(x1+x2)/2;
-      const onEdge = on && ap.has(n.parentId);
-      svg+=`<path class="edge ${onEdge?'on':''}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"/>`;
-      const lbl=`${MODES[n.mode].icon} ${fmtMin(edgeMinutes(n))}${edgeSource(n)==='est'?'*':''}`; const lw=lbl.length*7.5+14;
-      svg+=`<rect class="edge-bg" x="${mx-lw/2}" y="${(y1+y2)/2-11}" width="${lw}" height="22" rx="11"/><text class="edge-label" x="${mx}" y="${(y1+y2)/2+4}" text-anchor="middle">${esc(lbl)}</text>`;
-    }
-    const depth=pos[id].x;
-    boxes+=`<div class="tnode ${on?'on':''} ${n.parentId?'':'root'}" style="left:${x}px;top:${y}px;height:${H}px" data-node="${id}">
-      <div class="tn-head"><span class="step">${depth===0?'起点':'第'+depth+'站'}</span><span class="name">${esc(p.name)}</span><span class="check">✓</span></div>
-      ${n.parentId?`<div class="tn-edge" data-stop><select data-mode="${id}" aria-label="交通方式">${modeOptions(n.mode)}</select><input type="number" min="0" data-min="${id}" value="${n.minutes??''}" placeholder="${autoMinutes(n)} 自动" aria-label="分钟"></div>`:`<div class="tn-edge muted" style="font-size:12px;padding-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block">始发地${p.note?' · '+esc(p.note):''}</div>`}
+    const n=node(id), p=place(n.placeId), x=pos[id].x*COLW, y=pos[id].y*ROWH, on=ap.has(id), ins=Object.keys(n.parents||{}), multi=ins.length>1;
+    const step=id===state.rootId?'起点':apIdx[id]!=null?'第'+apIdx[id]+'站':'第'+lay[id]+'站';
+    const edges=ins.map(pid=>{ const l=legOf(pid,id); return `${multi?`<div class="tn-from">← ${esc(place(node(pid).placeId).name.split(' ')[0])}</div>`:''}<div class="tn-edge" data-stop><select data-mode="${legRef(l)}" aria-label="交通方式">${modeOptions(l.mode)}</select><input type="number" min="0" data-min="${legRef(l)}" value="${l.minutes??''}" placeholder="${autoMinutes(l)} 自动" aria-label="分钟">${multi?`<button class="btn small ghost danger" data-unlink="${legRef(l)}" title="断开这条连接">×</button>`:''}</div>`; }).join('');
+    boxes+=`<div class="tnode ${on?'on':''} ${id===state.rootId?'root':''}" style="left:${x}px;top:${y}px;height:${hOf(id)}px" data-node="${id}">
+      <div class="tn-head"><span class="step">${step}</span><span class="name">${esc(p.name)}</span><span class="check">✓</span></div>
+      ${ins.length?edges:`<div class="tn-edge muted" style="font-size:12px;padding-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block">始发地${p.note?' · '+esc(p.note):''}</div>`}
       <div class="tn-foot"><span class="days">${p.days} 天 · ${p.attractions.filter(a=>a.decision==='go').length}/${p.attractions.length} 景点</span>
-        <span class="row" style="gap:2px" data-stop><button class="btn small ghost" data-add="${id}" title="添加下一站分支">＋ 分支</button>${n.parentId?`<button class="btn small ghost danger" data-del="${id}" title="删除此分支">×</button>`:''}</span></div>
+        <span class="row" style="gap:2px" data-stop><button class="btn small ghost" data-add="${id}" title="添加下一站分支，或汇入已有站点">＋ 分支</button>${id===state.rootId?'':`<button class="btn small ghost danger" data-del="${id}" title="删除此站点">×</button>`}</span></div>
     </div>`;
   });
-  const plans=leaves().map(l=>pathTo(l));
+  const plans=allPaths(), apKey=apList.join('>');
   const v=document.getElementById('v-tree');
   v.innerHTML=`
-  <div class="section-head"><h2>路线树 · 分岔与选择</h2><p>每个方框是一个可能的站点，从起点向右分岔。点击任一方框，起点到它的这条路径就成为「当前方案」，其余页面都会随之更新。驾车时间默认按真实公路路线计算（${esc(provider().name)}）；带 * 的是路线暂时拿不到时的直线估算。都可以手动改。</p></div>
+  <div class="section-head"><h2>路线树 · 分岔与选择</h2><p>每个方框是一个可能的站点，从起点向右分岔。点击任一方框，起点到它的这条路径就成为「当前方案」，其余页面都会随之更新。「＋ 分支」也可以把一条分支汇入已有站点，之后的行程就共用一份。驾车时间默认按真实公路路线计算（${esc(provider().name)}）；带 * 的是路线暂时拿不到时的直线估算。都可以手动改。</p></div>
   <div class="tree-layout">
     <div class="tree-scroll"><div class="tree-canvas" style="width:${cw}px;height:${ch}px"><svg width="${cw}" height="${ch}">${svg}</svg>${boxes}</div></div>
     <div>
       <div class="section-head" style="margin-bottom:8px"><h2 style="font-size:14px">完整路线对比</h2><span class="hint">${plans.length} 条</span></div>
-      <div class="compare">${plans.map(p=>{ const m=metrics(p), c=costOf(p), on=p[p.length-1]===state.activeLeafId;
-        return `<div class="card plan ${on?'on':''}" data-adopt="${p[p.length-1]}">
+      <div class="compare">${plans.map(p=>{ const m=metrics(p), c=costOf(p), on=p.join('>')===apKey;
+        return `<div class="card plan ${on?'on':''}" data-adopt="${p.join('>')}">
           <div class="route">${p.map((id,i)=>`${i?'<span class="arrow">→</span>':''}<span>${esc(place(node(id).placeId).name.split(' ')[0])}</span>`).join('')}</div>
           <div class="metrics"><div class="metric"><b>${m.days}</b><span>晚</span></div><div class="metric"><b>${fmtMin(m.travel)}</b><span>在途 · ${Math.round(m.km)} km</span></div><div class="metric"><b>${m.go}<span style="font-size:11px;color:var(--muted)">+${m.tbd}?</span></b><span>已选景点 · 待定</span></div><div class="metric"><b>${yuan(c.total)}</b><span>预算</span></div></div>
           <div class="adopt"><span class="check" style="width:16px;height:16px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-size:10px;${on?'background:var(--accent);border-color:var(--accent);color:var(--accent-ink)':'color:transparent'}">✓</span>${on?'当前采用的方案':'点击采用这条路线'}</div>
@@ -655,11 +693,11 @@ function schematicSvg(){   // offline fallback used only when Leaflet could not 
   const ox=(VW-spanX*sc)/2, oy=(VH-spanY*sc)/2;
   const X=p=>ox+(p.lng*k-minX)*sc, Y=p=>VH-(oy+(p.lat-minY)*sc);
   let grid=''; for(let i=1;i<10;i++){ grid+=`<line class="grid" x1="${VW*i/10}" y1="0" x2="${VW*i/10}" y2="${VH}"/>`; } for(let i=1;i<7;i++){ grid+=`<line class="grid" x1="0" y1="${VH*i/7}" x2="${VW}" y2="${VH*i/7}"/>`; }
-  const apSet=new Set(ap); let alt='',route='',legs='',pts='';
-  Object.values(state.nodes).forEach(n=>{ if(!n.parentId) return; const a=place(node(n.parentId).placeId), b=place(n.placeId);
-    const on=apSet.has(n.id)&&apSet.has(n.parentId);
+  const apIdx={}; ap.forEach((id,i)=>apIdx[id]=i); let alt='',route='',legs='',pts='';
+  allLegs().forEach(l=>{ const [a,b]=legPlaces(l);
+    const on=apIdx[l.pid]!=null&&apIdx[l.cid]===apIdx[l.pid]+1;
     if(on){ route+=`<line class="route" x1="${X(a)}" y1="${Y(a)}" x2="${X(b)}" y2="${Y(b)}"/>`;
-      const mx=(X(a)+X(b))/2,my=(Y(a)+Y(b))/2, t=`${MODES[n.mode].icon} ${fmtMin(edgeMinutes(n))}`; legs+=`<rect class="leglbl-bg" x="${mx-t.length*3.6-6}" y="${my-9}" width="${t.length*7.2+12}" height="18" rx="9"/><text class="leglbl" x="${mx}" y="${my+4}">${esc(t)}</text>`; }
+      const mx=(X(a)+X(b))/2,my=(Y(a)+Y(b))/2, t=`${MODES[l.mode].icon} ${fmtMin(edgeMinutes(l))}`; legs+=`<rect class="leglbl-bg" x="${mx-t.length*3.6-6}" y="${my-9}" width="${t.length*7.2+12}" height="18" rx="9"/><text class="leglbl" x="${mx}" y="${my+4}">${esc(t)}</text>`; }
     else alt+=`<line class="alt" x1="${X(a)}" y1="${Y(a)}" x2="${X(b)}" y2="${Y(b)}"/>`; });
   const onPlaces=new Set(ap.map(id=>node(id).placeId));
   all.forEach(p=>{ if(!onPlaces.has(p.id)) pts+=`<circle class="pt ghost" cx="${X(p)}" cy="${Y(p)}" r="4"/><text class="lbl ghost" x="${X(p)+8}" y="${Y(p)-6}">${esc(p.name.split(' ')[0])}</text>`; });
@@ -678,14 +716,14 @@ function mountMap(){
   const t=provider().tiles;
   if(leafTileKey!==t.url){ if(leafTiles) leafTiles.remove(); leafTiles=L.tileLayer(t.url,{subdomains:t.sub,attribution:t.attr,maxZoom:18,crossOrigin:'anonymous'}).addTo(leaf); leafTileKey=t.url; }
   leafLayer.clearLayers();
-  const ap=activePath(), apSet=new Set(ap), gcj=provider().gcj, accent=cssVar('--accent'), ghost=cssVar('--ghost');
+  const ap=activePath(), gcj=provider().gcj, accent=cssVar('--accent'), ghost=cssVar('--ghost'), apIdx={}; ap.forEach((id,i)=>apIdx[id]=i);
   const LL=p=>gcj?GCJ.fromWgs(p.lat,p.lng):[p.lat,p.lng];   // tiles and routed geometry are both in the provider's datum
   const used=Object.values(state.places).filter(p=>Object.values(state.nodes).some(n=>n.placeId===p.id));
   const onPlaces=new Set(ap.map(id=>node(id).placeId));
-  Object.values(state.nodes).forEach(n=>{ if(!n.parentId) return; const a=place(node(n.parentId).placeId), b=place(n.placeId), on=apSet.has(n.id)&&apSet.has(n.parentId), r=routed(n);
+  allLegs().forEach(l=>{ const [a,b]=legPlaces(l), on=apIdx[l.pid]!=null&&apIdx[l.cid]===apIdx[l.pid]+1, r=routed(l);
     const pts=r&&r.geo&&r.geo.length>1?r.geo:[LL(a),LL(b)];
     L.polyline(pts,{color:on?accent:ghost,weight:on?4:2,dashArray:on?null:'5 5',opacity:on?.95:.8,interactive:false}).addTo(leafLayer);
-    if(on){ const mid=pts[Math.floor(pts.length/2)]; L.marker(mid,{icon:L.divIcon({className:'leg-tip-wrap',html:`<span class="leg-tip">${MODES[n.mode].icon} ${fmtMin(edgeMinutes(n))}</span>`,iconSize:[0,0]}),interactive:false,keyboard:false}).addTo(leafLayer); } });
+    if(on){ const mid=pts[Math.floor(pts.length/2)]; L.marker(mid,{icon:L.divIcon({className:'leg-tip-wrap',html:`<span class="leg-tip">${MODES[l.mode].icon} ${fmtMin(edgeMinutes(l))}</span>`,iconSize:[0,0]}),interactive:false,keyboard:false}).addTo(leafLayer); } });
   used.forEach(p=>{ if(onPlaces.has(p.id)) return;
     L.marker(LL(p),{icon:L.divIcon({className:'',html:'<div class="pin ghost"></div>',iconSize:[14,14],iconAnchor:[7,7]}),keyboard:false}).bindTooltip(esc(p.name.split(' ')[0]),{direction:'right',offset:[8,0],className:'pin-lbl ghost'}).addTo(leafLayer); });
   ap.forEach((id,i)=>{ const p=place(node(id).placeId);
@@ -698,7 +736,7 @@ function mountMap(){
 
 /* ---- static map for the summary sheet: tiles stitched on a canvas at print resolution, route and stops drawn on top ---- */
 const staticMap={key:'',url:'',busy:false,printWhenReady:false};
-function staticMapKey(){ return provider().tiles.url+'|'+activePath().map(id=>{ const r=routed(node(id)); return id+':'+(r&&r.geo?r.geo.length:0); }).join(','); }
+function staticMapKey(){ const ap=activePath(); return provider().tiles.url+'|'+ap.map((id,i)=>{ const r=i?routed(legOf(ap[i-1],id)):null; return id+':'+(r&&r.geo?r.geo.length:0); }).join(','); }
 function tileXY(lat,lng,z){ const n=2**z, r=lat*Math.PI/180; return [(lng+180)/360*n, (1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n]; }
 function loadTile(url){ return new Promise(res=>{ const img=new Image(); img.crossOrigin='anonymous'; const done=v=>{ clearTimeout(tm); res(v); }; const tm=setTimeout(()=>done(null),12000); img.onload=()=>done(img); img.onerror=()=>done(null); img.src=url; }); }
 async function buildStaticMap(){
@@ -706,7 +744,7 @@ async function buildStaticMap(){
   try{
     const W=1600,H=1000,PAD=120, ap=activePath(), t=provider().tiles, gcj=provider().gcj;
     const LL=p=>gcj?GCJ.fromWgs(p.lat,p.lng):[p.lat,p.lng];
-    const legs=ap.map((id,i)=>{ const n=node(id); if(!i) return null; const r=routed(n); return {n, pts:(r&&r.geo&&r.geo.length>1)?r.geo:[LL(place(node(n.parentId).placeId)),LL(place(n.placeId))]}; }).filter(Boolean);
+    const legs=pathLegs(ap).filter(Boolean).map(leg=>{ const r=routed(leg), [a,b]=legPlaces(leg); return {leg, pts:(r&&r.geo&&r.geo.length>1)?r.geo:[LL(a),LL(b)]}; });
     const stops=ap.map((id,i)=>({i,p:place(node(id).placeId),ll:LL(place(node(id).placeId))}));
     const all=stops.map(s=>s.ll).concat(...legs.map(l=>l.pts));
     // fractional zoom so the route fills the canvas; tiles come from the nearest integer zoom and are scaled to fit
@@ -727,7 +765,7 @@ async function buildStaticMap(){
       legs.forEach(l=>{ g.beginPath(); l.pts.forEach((p,i)=>g[i?'lineTo':'moveTo'](X(p),Y(p))); g.stroke(); }); }
     // leg time pills
     g.font='500 22px "IBM Plex Mono",Menlo,monospace'; g.textBaseline='middle';
-    legs.forEach(l=>{ const mid=l.pts[Math.floor(l.pts.length/2)], txt=`${MODES[l.n.mode].icon} ${fmtMin(edgeMinutes(l.n))}`, w=g.measureText(txt).width+26, x=X(mid), y=Y(mid);
+    legs.forEach(l=>{ const mid=l.pts[Math.floor(l.pts.length/2)], txt=`${MODES[l.leg.mode].icon} ${fmtMin(edgeMinutes(l.leg))}`, w=g.measureText(txt).width+26, x=X(mid), y=Y(mid);
       g.fillStyle='#fff'; g.strokeStyle='#D5DDE4'; g.lineWidth=2; g.beginPath(); g.roundRect(x-w/2,y-19,w,38,19); g.fill(); g.stroke(); g.fillStyle='#182230'; g.textAlign='center'; g.fillText(txt,x,y+1); });
     // stops: numbered pins with name labels; stops at the same coordinates (origin and return) share one pin
     const groups=new Map(); stops.forEach(s=>{ const k=s.ll[0].toFixed(5)+','+s.ll[1].toFixed(5); if(!groups.has(k)) groups.set(k,{ll:s.ll,idx:[],name:s.p.name.split(' ')[0],origin:false}); const gp=groups.get(k); gp.idx.push(s.i||'S'); if(!s.i) gp.origin=true; });
@@ -752,10 +790,10 @@ function renderPlan(){
     <div class="card panel col-left">
       <h3>站点与交通 <button class="btn small primary" data-add="${ap[ap.length-1]}">＋ 添加站点</button></h3>
       <div class="stop-list">
-      ${ap.map((id,i)=>{ const n=node(id), p=place(n.placeId); return `
-        ${i?`<div class="leg"><div class="rail"><i></i></div><div class="box">
-          <div class="row"><select data-mode="${id}" aria-label="交通方式">${modeOptions(n.mode)}</select><input type="number" min="0" data-min="${id}" value="${n.minutes??''}" placeholder="${autoMinutes(n)}" aria-label="分钟"><span class="hint">分钟</span></div>
-          <div class="est">${legSourceText(n)}</div></div></div>`:''}
+      ${ap.map((id,i)=>{ const n=node(id), p=place(n.placeId), l=i?legOf(ap[i-1],id):null; return `
+        ${l?`<div class="leg"><div class="rail"><i></i></div><div class="box">
+          <div class="row"><select data-mode="${legRef(l)}" aria-label="交通方式">${modeOptions(l.mode)}</select><input type="number" min="0" data-min="${legRef(l)}" value="${l.minutes??''}" placeholder="${autoMinutes(l)}" aria-label="分钟"><span class="hint">分钟</span></div>
+          <div class="est">${legSourceText(l)}</div></div></div>`:''}
         <div class="stop ${i?'':'origin'}"><div class="dot">${i||'S'}</div><div class="body">
           <div class="title"><b>${esc(p.name)}</b><span class="row" style="gap:2px"><button class="btn small ghost" data-goto="${p.id}">景点 ›</button>${i?`<button class="btn small ghost danger" data-splice="${id}" title="从当前方案移除">×</button>`:''}</span></div>
           <div class="ctrls"><label class="field"><span class="hint">停留天数</span><input type="number" min="0" step="0.5" data-days="${p.id}" value="${p.days}"></label><label class="field"><span class="hint">地图</span><span class="row" style="gap:4px"><a class="btn small" href="${amapLink(p)}" target="_blank" rel="noopener">高德</a><a class="btn small" href="${placeLink(p)}" target="_blank" rel="noopener">Google</a></span></label></div>
@@ -844,16 +882,16 @@ function renderSummary(){
   </div>
   <article class="sheet">
     <div class="masthead"><div><div class="eyebrow">Itinerary · 行程总结</div><h1>${esc(state.title)}</h1></div><div class="sub">${ap.length-2} 站 · ${m.days} 晚${start?` · ${fmtDate(1)} 出发`:''}</div></div>
-    <div class="strip">${ap.map((id,i)=>{ const n=node(id), p=place(n.placeId); return `${i?`<span class="l"><span>${MODES[n.mode].icon} ${MODES[n.mode].label}</span><span>${fmtMin(edgeMinutes(n))}</span></span>`:''}<span class="s ${i?'':'origin'}"><i>${i||'S'}</i>${esc(p.name.split(' ')[0])}</span>`; }).join('')}</div>
+    <div class="strip">${ap.map((id,i)=>{ const p=place(node(id).placeId), l=i?legOf(ap[i-1],id):null; return `${l?`<span class="l"><span>${MODES[l.mode].icon} ${MODES[l.mode].label}</span><span>${fmtMin(edgeMinutes(l))}</span></span>`:''}<span class="s ${i?'':'origin'}"><i>${i||'S'}</i>${esc(p.name.split(' ')[0])}</span>`; }).join('')}</div>
     <div class="totals"><div><b>${m.days}</b><span>晚</span></div><div><b>${fmtMin(m.travel)}</b><span>在途时间</span></div><div><b>${Math.round(m.km)} km</b><span>总里程</span></div><div><b>${m.go}</b><span>已选景点 · ${m.hours}h</span></div></div>
     <div class="budget"><div><b>${yuan(c.total)}</b><span>预算合计</span></div><div><b>${yuan(c.drive+c.tolls)}</b><span>驾车 ${Math.round(m.km)} km${c.tolls?' 含过路费':''}</span></div><div><b>${yuan(c.hotel)}</b><span>住宿 ${m.days} 晚</span></div><div><b>${yuan(c.food)}</b><span>餐饮</span></div><div><b>${yuan(c.tickets)}</b><span>门票 ${m.go} 个景点</span></div></div>
     <figure class="print-map">${staticMap.key===staticMapKey()?(staticMap.url?`<img src="${staticMap.url}" alt="路线地图">`:schematicSvg()):'<div class="gen">地图生成中…</div>'}</figure>
-    ${ap.map((id,i)=>{ const n=node(id), p=place(n.placeId); const nights=Number(p.days)||0, d0=day, span=nights>0?Math.ceil(nights):0, last=i===ap.length-1; day+=span;   // a 0-night stop shares its day with the next stop
+    ${ap.map((id,i)=>{ const n=node(id), p=place(n.placeId), l=i?legOf(ap[i-1],id):null; const nights=Number(p.days)||0, d0=day, span=nights>0?Math.ceil(nights):0, last=i===ap.length-1; day+=span;   // a 0-night stop shares its day with the next stop
       const go=p.attractions.filter(a=>a.decision==='go'), tbd=p.attractions.filter(a=>a.decision==='tbd');
       const when=(i===0&&!span)?`<b>出发</b>${start?fmtDate(d0):''}`:`<b>Day ${d0}${span>1?'–'+(d0+span-1):''}</b>${start?`${fmtDate(d0)}${span>1?' – '+fmtDate(d0+span-1):''}<br>`:''}${nights>0?p.days+' 天停留':last?'到达，行程结束':'途经，不过夜'}`;
       return `<section class="day"><div class="when">${when}</div>
         <div><h3>${i?i+'. ':''}${esc(p.name)}</h3>
-        ${i?`<div class="arrive">${MODES[n.mode].icon} 从 ${esc(place(node(n.parentId).placeId).name.split(' ')[0])} ${MODES[n.mode].label}抵达 · 约 ${fmtMin(edgeMinutes(n))}</div>`:'<div class="arrive">出发地</div>'}
+        ${l?`<div class="arrive">${MODES[l.mode].icon} 从 ${esc(place(node(l.pid).placeId).name.split(' ')[0])} ${MODES[l.mode].label}抵达 · 约 ${fmtMin(edgeMinutes(l))}</div>`:'<div class="arrive">出发地</div>'}
         ${go.length?`<div class="picks">${go.map(a=>`<div class="pick"><div class="th">${a.img?`<img src="${a.img}" alt="">`:''}</div><div><b>${esc(a.name)}</b><span class="t">${a.hours}h</span><p>${esc(a.desc)}</p></div></div>`).join('')}</div>`:'<div class="none">还没有确定要去的景点</div>'}
         ${tbd.length?`<div class="note">待定：${tbd.map(a=>esc(a.name)).join('、')}</div>`:''}
         ${stopCost(p)?`<div class="note">预算 ${yuan(stopCost(p))}${p.hotel&&nights?` · 住宿 ¥${p.hotel} × ${nights} 晚`:''}${p.food&&nights?` · 餐饮 ¥${p.food}/天`:''}${go.some(a=>a.ticket)?` · 门票 ¥${go.reduce((s,a)=>s+(Number(a.ticket)||0),0)}`:''}</div>`:''}
@@ -868,12 +906,16 @@ function renderSummary(){
 function openAddStop(parentId){
   const parent=node(parentId), pp=place(parent.placeId);
   const existing=Object.values(state.places).filter(p=>p.id!==parent.placeId);
+  const anc=ancestors(parentId), lay=layers();   // merge targets: any stop that is not this one, not before it on some path, and not already its next stop
+  const targets=Object.values(state.nodes).filter(n=>n.id!==parentId&&n.id!==state.rootId&&!anc.has(n.id)&&!n.parents[parentId]).sort((a,b)=>lay[a.id]-lay[b.id]);
   const root=document.getElementById('modal-root');
   let tab=existing.length?'existing':'new';
   const draw=()=>{ root.innerHTML=`<div class="modal-bg" data-close><form class="modal" id="add-stop-form">
     <h3>在「${esc(pp.name.split(' ')[0])}」之后添加站点</h3>
-    <div class="seg"><button type="button" data-tab="existing" class="${tab==='existing'?'on':''}">已有地点</button><button type="button" data-tab="new" class="${tab==='new'?'on':''}">新地点</button></div>
+    <div class="seg"><button type="button" data-tab="existing" class="${tab==='existing'?'on':''}">已有地点</button><button type="button" data-tab="new" class="${tab==='new'?'on':''}">新地点</button><button type="button" data-tab="merge" class="${tab==='merge'?'on':''}">汇入已有站点</button></div>
     ${tab==='existing'?`<label class="field"><span>选择地点</span><select id="as-place">${existing.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label>`
+    :tab==='merge'?`<label class="field"><span>接到路线树里已有的站点</span><select id="as-target" ${targets.length?'':'disabled'}>${targets.length?targets.map(n=>`<option value="${n.id}">${esc(place(n.placeId).name)}（第${lay[n.id]}站 · 前一站 ${esc(place(node(n.parentId).placeId).name.split(' ')[0])}）</option>`).join(''):'<option>没有可汇入的站点</option>'}</select></label>
+      <span class="hint">两条分支在这里汇合：之后的站点共用一份，不用再复制。汇合后每条走法仍会单独出现在「完整路线对比」里。</span>`
     :`<div class="row"><input id="as-q" placeholder="搜索地名或景点，例：阳朔、猫儿山" style="flex:1" autocomplete="off"><button type="button" class="btn" id="as-search">搜索</button></div>
       <div class="results" id="as-results"></div>
       <label class="field"><span>名称</span><input id="as-name" placeholder="例：阳朔" required></label>
@@ -892,9 +934,10 @@ function openAddStop(parentId){
           box.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>{ const r=rs[+b.dataset.pick]; root.querySelector('#as-name').value=r.name; root.querySelector('#as-lat').value=r.lat.toFixed(5); root.querySelector('#as-lng').value=r.lng.toFixed(5); box.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); });
         }catch(e){ box.innerHTML=`<span class="hint">搜索失败：${esc(e.message||'')}</span>`; } };
       root.querySelector('#as-search').onclick=run; q.onkeydown=e=>{ if(e.key==='Enter'){ e.preventDefault(); run(); } }; }
-    root.querySelector('#add-stop-form').onsubmit=e=>{ e.preventDefault();
+    root.querySelector('#add-stop-form').onsubmit=e=>{ e.preventDefault(); const mode=root.querySelector('#as-mode').value;
+      if(tab==='merge'){ if(!targets.length||!linkNode(parentId,root.querySelector('#as-target').value,mode)){ toast('这个站点不能汇入'); return; } root.innerHTML=''; toast('已汇入，之后的站点共用'); render(); return; }
       let pid; if(tab==='existing') pid=root.querySelector('#as-place').value; else pid=createPlace(root.querySelector('#as-name').value.trim(),root.querySelector('#as-lat').value,root.querySelector('#as-lng').value,root.querySelector('#as-days').value).id;
-      addNode(parentId,pid,root.querySelector('#as-mode').value); root.innerHTML=''; toast('已添加站点并切换到该路线'); render(); };
+      addNode(parentId,pid,mode); root.innerHTML=''; toast('已添加站点并切换到该路线'); render(); };
     const f=root.querySelector('input,select'); f&&f.focus();
   }; draw();
 }
@@ -933,25 +976,26 @@ document.addEventListener('keydown',e=>{ if(e.target.matches('input,textarea,sel
 
 document.body.addEventListener('click',e=>{
   const t=e.target;
-  const b=t.closest('[data-add],[data-del],[data-adopt],[data-goto],[data-splice],[data-decide],[data-adel],[data-auto],[data-view-go],[data-node]');
+  const b=t.closest('[data-add],[data-del],[data-adopt],[data-goto],[data-splice],[data-decide],[data-adel],[data-auto],[data-unlink],[data-view-go],[data-node]');
   if(!b) return;
   if(b.dataset.add){ openAddStop(b.dataset.add); return; }
-  if(b.dataset.auto){ node(b.dataset.auto).minutes=null; toast('已改用公路路线时间'); render(); return; }
-  if(b.dataset.del){ deleteSubtree(b.dataset.del); render(); return; }
-  if(b.dataset.adopt){ state.activeLeafId=b.dataset.adopt; render(); return; }
+  if(b.dataset.auto){ const [pid,cid]=b.dataset.auto.split('>'); node(cid).parents[pid].minutes=null; toast('已改用公路路线时间'); render(); return; }
+  if(b.dataset.unlink){ const [pid,cid]=b.dataset.unlink.split('>'); unlink(pid,cid); render(); return; }
+  if(b.dataset.del){ deleteNode(b.dataset.del); render(); return; }
+  if(b.dataset.adopt){ state.activePath=b.dataset.adopt.split('>'); render(); return; }
   if(b.dataset.goto){ state.currentPlaceId=b.dataset.goto; state.view='detail'; render(); return; }
   if(b.dataset.splice){ spliceNode(b.dataset.splice); render(); return; }
   if(b.dataset.decide){ const a=findAttr(b.dataset.decide); a.decision=b.dataset.val; render(); return; }
   if(b.dataset.adel){ const p=place(state.currentPlaceId); p.attractions=p.attractions.filter(a=>a.id!==b.dataset.adel); render(); return; }
   if(b.dataset.viewGo){ state.view=b.dataset.viewGo; render(); return; }
-  if(b.dataset.node){ if(t.closest('[data-stop]')) return; state.activeLeafId=b.dataset.node; render(); return; }
+  if(b.dataset.node){ if(t.closest('[data-stop]')) return; state.activePath=pathTo(b.dataset.node); render(); return; }
 });
 function findAttr(id){ for(const p of Object.values(state.places)){ const a=p.attractions.find(a=>a.id===id); if(a) return a; } }
 
 document.body.addEventListener('change',e=>{
   const t=e.target, d=t.dataset;
-  if(d.mode){ node(d.mode).mode=t.value; render(); }
-  else if(d.min){ node(d.min).minutes=t.value===''?null:Number(t.value); render(); }
+  if(d.mode){ const [pid,cid]=d.mode.split('>'); node(cid).parents[pid].mode=t.value; render(); }
+  else if(d.min){ const [pid,cid]=d.min.split('>'); node(cid).parents[pid].minutes=t.value===''?null:Number(t.value); render(); }
   else if(d.days){ place(d.days).days=Number(t.value)||0; render(); }
   else if(d.note){ place(d.note).note=t.value; }
   else if(d.aname){ findAttr(d.aname).name=t.value; }

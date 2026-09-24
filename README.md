@@ -16,7 +16,9 @@ Sample data: a 7-day National Day self-drive trip from Changsha through southern
 
 ## Saving and sharing
 
-- The trip autosaves in the browser (IndexedDB), so a refresh keeps it.
+- The trip autosaves on every keystroke to **localStorage** and **IndexedDB**; on load the newest valid copy wins. localStorage matters because Chrome may delete a site's IndexedDB when the disk is nearly full, but leaves localStorage alone. Photos that don't fit in localStorage stay in IndexedDB only. The app also asks Chrome for persistent storage.
+- The top bar shows the save state; click it for details and **history versions** (one every 10 minutes, plus one before every import, reset or restore), each restorable.
+- If a saved copy can't be read it is set aside as `waypoint.state.unreadable` instead of being overwritten. A second open tab follows the first one's edits, so closing it can't overwrite newer work.
 - **导出** downloads the trip as a JSON file; **导入** loads one. That is how you send a plan to a friend and get their edits back. Photos are embedded in the file, so it grows with the number of images.
 - **⚙ 设置 → 重置为示例行程** restores the sample.
 

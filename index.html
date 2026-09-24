@@ -260,6 +260,15 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 .results button{text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:6px 8px;font-size:12px;color:var(--muted)}
 .results button b{display:block;font-size:13px;color:var(--ink)}
 .results button.on{border-color:var(--accent);background:var(--accent-soft)}
+.save-status{border:none;background:none;font-size:12px;color:var(--muted);padding:3px 6px;border-radius:6px;white-space:nowrap}
+.save-status:hover{background:var(--surface-2);color:var(--ink)}
+.save-status.warn{color:var(--bad);font-weight:700}
+.save-box{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:10px}
+.save-box .kv{display:flex;justify-content:space-between;gap:10px;font-size:12px}
+.save-box .kv span:first-child{color:var(--muted);white-space:nowrap}
+.snaps{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto}
+.snap{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;padding:4px 4px 4px 8px;border:1px solid var(--line);border-radius:6px}
+.snap span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .budget{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:0 0 20px;padding:12px 14px;background:var(--surface-2);border-radius:8px}
 .budget div b{display:block;font-family:var(--mono);font-size:16px;font-weight:500}
 .budget div span{font-size:11px;color:var(--muted)}
@@ -268,7 +277,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 
 /* ---------- modal ---------- */
 .modal-bg{position:fixed;inset:0;background:rgba(10,16,22,.45);display:grid;place-items:center;z-index:50;padding:16px}
-.modal{background:var(--surface);border-radius:12px;padding:20px;width:100%;max-width:440px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px}
+.modal{background:var(--surface);border-radius:12px;padding:20px;width:100%;max-width:440px;max-height:calc(100vh - 32px);overflow:auto;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px}
 .modal h3{font-size:16px;font-weight:800}
 .modal .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .seg{display:flex;background:var(--surface-2);border-radius:8px;padding:3px}
@@ -314,7 +323,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
     <button class="tab" data-view="summary"><span class="k">4</span><span class="t">总结导出</span></button>
   </nav>
   <div class="active-plan" id="active-plan"></div>
-  <div class="tools"><label class="btn small" title="导入 Waypoint JSON 文件">导入<input type="file" accept=".json,application/json" id="import-json" hidden></label><button class="btn small" id="btn-export" title="导出为 JSON 文件，发给朋友">导出</button><button class="btn small" id="btn-settings">⚙ 设置</button></div>
+  <div class="tools"><button type="button" class="save-status" id="save-status"></button><label class="btn small" title="导入 Waypoint JSON 文件">导入<input type="file" accept=".json,application/json" id="import-json" hidden></label><button class="btn small" id="btn-export" title="导出为 JSON 文件，发给朋友">导出</button><button class="btn small" id="btn-settings">⚙ 设置</button></div>
 </header>
 
 <section class="view" id="v-tree"></section>
@@ -551,18 +560,73 @@ function costOf(pathIds){
 }
 const yuan = v => '¥'+Math.round(v).toLocaleString('zh-CN');
 
-/* ============ persistence: IndexedDB autosave in this browser; a JSON file to share ============ */
+/* ============ persistence ============
+   Every edit is written to localStorage (synchronous; Chrome does not clear it when the disk runs low) and to
+   IndexedDB (room for photos, but Chrome may delete it under storage pressure). On load the newest valid copy wins.
+   Snapshots allow going back; an exported JSON file stays the safest backup. */
 const DB={ _db:null,
-  open(){ if(this._db) return Promise.resolve(this._db); return new Promise((res,rej)=>{ if(!window.indexedDB) return rej(new Error('no indexedDB')); const r=indexedDB.open('waypoint',1); r.onupgradeneeded=()=>r.result.createObjectStore('kv'); r.onsuccess=()=>{ this._db=r.result; res(this._db); }; r.onerror=()=>rej(r.error); }); },
-  async get(k){ const db=await this.open(); return new Promise((res,rej)=>{ const q=db.transaction('kv').objectStore('kv').get(k); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); },
-  async set(k,v){ const db=await this.open(); return new Promise((res,rej)=>{ const q=db.transaction('kv','readwrite').objectStore('kv').put(v,k); q.onsuccess=()=>res(); q.onerror=()=>rej(q.error); }); },
+  open(){ if(this._db) return Promise.resolve(this._db); return new Promise((res,rej)=>{ if(!window.indexedDB) return rej(new Error('no indexedDB')); const r=indexedDB.open('waypoint',1); r.onupgradeneeded=()=>r.result.createObjectStore('kv');
+    r.onsuccess=()=>{ const db=r.result; db.onclose=()=>{ if(this._db===db) this._db=null; }; db.onversionchange=()=>{ db.close(); if(this._db===db) this._db=null; }; this._db=db; res(db); }; r.onerror=()=>rej(r.error); r.onblocked=()=>rej(new Error('blocked')); }); },
+  async tx(mode,fn){ const db=await this.open(); return new Promise((res,rej)=>{ let t; try{ t=db.transaction('kv',mode); }catch(e){ this._db=null; return rej(e); }   // a connection Chrome closed is reopened next time
+    const q=fn(t.objectStore('kv')); t.oncomplete=()=>res(q.result); t.onerror=t.onabort=()=>rej(t.error||new Error('aborted')); }); },
+  get(k){ return this.tx('readonly',s=>s.get(k)); },
+  set(k,v){ return this.tx('readwrite',s=>s.put(v,k)); },
 };
-let saveT=null;
-function scheduleSave(){ clearTimeout(saveT); saveT=setTimeout(saveNow,400); }
-function saveNow(){ clearTimeout(saveT); DB.set('state',state).catch(()=>{}); }
+const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))]);
+const LS_STATE='waypoint.state', LS_SNAPS='waypoint.snapshots', SNAP_EVERY=10*60*1000, SNAP_MAX=12;
+let booted=false, saveT=null, lastSig='', snaps=[];   // snaps: [{t,label,title,stops,state}], newest first
+const saveInfo={at:0,ls:'',idb:'',lsAvail:false,persisted:null};
+const sigOf = s => JSON.stringify(s,(k,v)=>k==='savedAt'?undefined:v);
+const validState = s => !!(s&&typeof s==='object'&&s.nodes&&s.places&&s.rootId&&s.nodes[s.rootId]);
+function stripImages(s){ const c=JSON.parse(JSON.stringify(s)); let had=false; Object.values(c.places||{}).forEach(p=>(p.attractions||[]).forEach(a=>{ if(a.img){ a.img=null; had=true; } })); if(had) c._imagesElsewhere=true; return c; }
+function restoreImages(s,...sources){ const m={}; sources.forEach(src=>src&&Object.values(src.places||{}).forEach(p=>(p.attractions||[]).forEach(a=>{ if(a.img&&!m[a.id]) m[a.id]=a.img; })));
+  Object.values(s.places||{}).forEach(p=>(p.attractions||[]).forEach(a=>{ if(!a.img&&m[a.id]) a.img=m[a.id]; })); delete s._imagesElsewhere; return s; }
+function writeLS(json){
+  try{ localStorage.setItem(LS_STATE,json); return 'ok'; }catch(_){}
+  try{ localStorage.removeItem(LS_SNAPS); localStorage.setItem(LS_STATE,json); return 'ok'; }catch(_){}   // make room: snapshots also live in IndexedDB
+  try{ localStorage.setItem(LS_STATE,JSON.stringify(stripImages(state))); return 'noimg'; }catch(_){}   // photos too big: keep everything else
+  return 'fail';
+}
+function scheduleSave(){ if(!booted) return; clearTimeout(saveT); saveT=setTimeout(saveNow,300); }
+function saveNow(){
+  clearTimeout(saveT); if(!booted) return;   // never write before the stored trip has been loaded
+  const sig=sigOf(state); if(sig===lastSig) return;
+  state.savedAt=Date.now(); saveInfo.at=state.savedAt;
+  saveInfo.ls=writeLS(JSON.stringify(state)); lastSig=saveInfo.ls==='fail'?'':sig;
+  DB.set('state',state).then(()=>{ saveInfo.idb='ok'; },()=>{ saveInfo.idb='fail'; }).finally(updateSaveStatus);
+  if(state.savedAt-(snaps[0]?.t||0)>SNAP_EVERY) takeSnapshot('自动');
+  updateSaveStatus();
+}
 window.addEventListener('pagehide',saveNow);
+window.addEventListener('beforeunload',saveNow);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') saveNow(); });
+function takeSnapshot(label){
+  snaps.unshift({t:Date.now(),label,title:state.title,stops:Object.keys(state.nodes).length,state:JSON.parse(JSON.stringify(state))});
+  snaps=snaps.slice(0,SNAP_MAX); DB.set('snapshots',snaps).catch(()=>{});
+  let list=snaps.map(s=>({...s,state:stripImages(s.state)}));   // localStorage copy without photos, capped so the trip itself always fits
+  while(list.length){ const j=JSON.stringify(list); if(j.length<1.5e6){ try{ localStorage.setItem(LS_SNAPS,j); return; }catch(_){} } list.pop(); }
+  try{ localStorage.removeItem(LS_SNAPS); }catch(_){}
+}
+function restoreSnapshot(s){
+  takeSnapshot('恢复前'); let st=JSON.parse(JSON.stringify(s.state)); if(st._imagesElsewhere) restoreImages(st,state);
+  state=migrate(st); fixActivePath(); render(); saveNow(); toast('已恢复到 '+fmtStamp(s.t)+' 的版本');
+}
+const fmtStamp=t=>{ const d=new Date(t); return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`; };
+async function requestPersist(){   // ask Chrome to exempt this site from clean-up when the disk runs low
+  try{ if(navigator.storage?.persisted){ saveInfo.persisted=await navigator.storage.persisted(); if(!saveInfo.persisted&&navigator.storage.persist) saveInfo.persisted=await navigator.storage.persist(); } }catch(_){}
+  updateSaveStatus();
+}
+function updateSaveStatus(){ const el=document.getElementById('save-status'); if(!el) return;
+  const ls=saveInfo.ls, idb=saveInfo.idb; let txt, warn=false;
+  if(!saveInfo.at) txt=saveInfo.lsAvail||idb==='ok'?'✓ 自动保存已开启':(warn=true,'⚠ 此浏览器无法保存');
+  else if(ls==='ok'||(ls==='noimg'&&idb==='ok')) txt='✓ 已保存 '+fmtStamp(saveInfo.at).split(' ')[1];
+  else if(ls==='noimg') { txt='⚠ 照片未能保存'; warn=true; }
+  else if(idb==='ok') txt='✓ 已保存 '+fmtStamp(saveInfo.at).split(' ')[1];
+  else { txt='⚠ 未能保存，请「导出」备份'; warn=true; }
+  el.textContent=txt; el.classList.toggle('warn',warn); el.title='点这里查看保存状态和历史版本';
+}
 function migrate(s){   // fill in fields added after a file was saved
-  s.costPerKm??=0.7; if(!['tree','plan','detail','summary'].includes(s.view)) s.view='tree';
+  delete s._imagesElsewhere; s.costPerKm??=0.7; if(!['tree','plan','detail','summary'].includes(s.view)) s.view='tree';
   Object.values(s.places).forEach(p=>{ p.hotel??=0; p.food??=0; p.note??=''; p.attractions??=[]; p.attractions.forEach(a=>{ a.ticket??=0; a.img??=null; }); });
   Object.values(s.nodes).forEach(n=>{ n.children??=[];
     if(!n.parents){ n.parents={}; if(n.parentId) n.parents[n.parentId]={mode:n.mode||'drive',minutes:n.minutes}; delete n.mode; delete n.minutes; }   // pre-merge format: one parent, edge stored on the node
@@ -574,7 +638,7 @@ function migrate(s){   // fill in fields added after a file was saved
   return s;
 }
 function exportJSON(){ const blob=new Blob([JSON.stringify(state,null,1)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`${(state.title||'waypoint').replace(/[\\\/:*?"<>|]/g,' ')}.json`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),3000); toast('已导出 JSON'); }
-function importJSON(file){ if(!file) return; const fr=new FileReader(); fr.onload=()=>{ try{ const d=JSON.parse(fr.result); if(!d.nodes||!d.places||!d.rootId||!d.nodes[d.rootId]) throw 0; state=migrate(d); fixActivePath(); toast('已导入行程'); render(); }catch(_){ toast('不是有效的 Waypoint JSON 文件'); } }; fr.readAsText(file); }
+function importJSON(file){ if(!file) return; const fr=new FileReader(); fr.onload=()=>{ try{ const d=JSON.parse(fr.result); if(!validState(d)) throw 0; const next=migrate(d); takeSnapshot('导入前'); state=next; fixActivePath(); toast('已导入 · 原来的行程已存为历史版本'); render(); saveNow(); }catch(_){ toast('不是有效的 Waypoint JSON 文件'); } }; fr.readAsText(file); }
 
 function gmapsLink(pathIds){
   const pts=pathIds.map(id=>place(node(id).placeId)); if(pts.length<2) return `https://www.google.com/maps/search/?api=1&query=${pts[0].lat},${pts[0].lng}`;
@@ -949,7 +1013,16 @@ function openSettings(){
     <div class="field"><span>高德 Web服务 Key（可选）</span><div class="row" style="flex-wrap:nowrap"><input id="st-key" style="flex:1" value="${esc(settings.amapKey)}" placeholder="粘贴后底图、路线和搜索改用高德" autocomplete="off" spellcheck="false"><button type="button" class="btn" id="st-test">测试</button></div><span class="hint" id="st-test-out"></span></div>
     <label class="field"><span>地图数据源</span><select id="st-prov"><option value="auto" ${settings.provider!=='osm'?'selected':''}>自动：有 Key 用高德，否则 OpenStreetMap + OSRM</option><option value="osm" ${settings.provider==='osm'?'selected':''}>始终用 OpenStreetMap + OSRM</option></select></label>
     <label class="field"><span>驾车每公里成本（油费等，¥/km）</span><input id="st-km" type="number" min="0" step="0.1" value="${state.costPerKm??0.7}"></label>
-    <p class="hint" style="margin:0">当前数据源：${esc(provider().name)}。Key 只存在这台浏览器里，不会随导出的 JSON 分享。行程会自动保存在本浏览器；要给朋友看，用顶栏「导出」发文件，对方用「导入」打开。</p>
+    <p class="hint" style="margin:0">当前数据源：${esc(provider().name)}。Key 只存在这台浏览器里，不会随导出的 JSON 分享。</p>
+    <div class="save-box">
+      <b style="font-size:13px">自动保存</b>
+      <div class="kv"><span>localStorage</span><span>${({ok:'✓ 已写入',noimg:'✓ 已写入（照片太大，只存在 IndexedDB）',fail:'✕ 写入失败'})[saveInfo.ls]||(saveInfo.lsAvail?'✓ 可用':'✕ 不可用')}</span></div>
+      <div class="kv"><span>IndexedDB</span><span>${({ok:'✓ 已写入',fail:'✕ 不可用'})[saveInfo.idb]||'…'}</span></div>
+      <div class="kv"><span>持久存储</span><span>${saveInfo.persisted==null?'浏览器不支持':saveInfo.persisted?'✓ 已开启，Chrome 不会自动清除':'未开启：磁盘快满时 Chrome 可能清掉 IndexedDB，localStorage 那份仍在'}</span></div>
+      <div class="kv"><span>上次保存</span><span>${saveInfo.at?fmtStamp(saveInfo.at):'本次打开后还没有修改'}</span></div>
+      <span class="hint">历史版本：每 10 分钟自动留一份，导入、重置、恢复之前也会留一份。最稳妥的备份仍是顶栏「导出」的 JSON 文件。</span>
+      <div class="snaps">${snaps.length?snaps.map((s,i)=>`<div class="snap"><span>${fmtStamp(s.t)} · ${esc(s.label)} · ${esc(s.title||'')} · ${s.stops} 站</span><button type="button" class="btn small" data-restore="${i}">恢复</button></div>`).join(''):'<span class="hint">还没有历史版本</span>'}</div>
+    </div>
     <div class="row" style="justify-content:space-between"><button type="button" class="btn small ghost" id="st-reroute">清除路线缓存并重算</button><button type="button" class="btn small ghost danger" id="st-reset">重置为示例行程</button></div>
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>取消</button><button type="submit" class="btn primary">保存</button></div>
   </form></div>`;
@@ -961,7 +1034,8 @@ function openSettings(){
       out.textContent=j.status==='1'?'✓ Key 可用，保存后地图、路线、搜索改用高德':`✕ ${WHY[j.infocode]||j.info||'失败'}（${j.infocode||''}）`; }
     catch(e){ out.textContent='✕ 请求失败，检查网络：'+(e.message||''); } };
   root.querySelector('#st-reroute').onclick=()=>{ clearRoutes(); root.innerHTML=''; toast('正在重新计算路线'); render(); };
-  root.querySelector('#st-reset').onclick=()=>{ if(!confirm('确定丢弃当前行程，恢复示例？')) return; state=sampleState(); root.innerHTML=''; render(); saveNow(); };
+  root.querySelector('#st-reset').onclick=()=>{ if(!confirm('确定换成示例行程？当前行程会先存为历史版本，可以在这里恢复。')) return; takeSnapshot('重置前'); state=sampleState(); root.innerHTML=''; render(); saveNow(); };
+  root.querySelectorAll('[data-restore]').forEach(b=>b.onclick=()=>{ const s=snaps[+b.dataset.restore]; if(!s||!confirm(`用 ${fmtStamp(s.t)} 的版本替换当前行程？当前行程会先存为历史版本。`)) return; root.innerHTML=''; restoreSnapshot(s); });
   root.querySelector('#settings-form').onsubmit=e=>{ e.preventDefault();
     settings.amapKey=root.querySelector('#st-key').value.trim(); settings.provider=root.querySelector('#st-prov').value; saveSettings();
     state.costPerKm=Number(root.querySelector('#st-km').value)||0;
@@ -971,7 +1045,6 @@ function openSettings(){
 
 /* ============ events ============ */
 document.getElementById('tabs').addEventListener('click',e=>{ const t=e.target.closest('.tab'); if(t){ state.view=t.dataset.view; render(); } });
-document.getElementById('trip-title').addEventListener('change',e=>{ state.title=e.target.value; scheduleSave(); });
 document.addEventListener('keydown',e=>{ if(e.target.matches('input,textarea,select')) return; const v={1:'tree',2:'plan',3:'detail',4:'summary'}[e.key]; if(v){state.view=v;render();} });
 
 document.body.addEventListener('click',e=>{
@@ -992,22 +1065,36 @@ document.body.addEventListener('click',e=>{
 });
 function findAttr(id){ for(const p of Object.values(state.places)){ const a=p.attractions.find(a=>a.id===id); if(a) return a; } }
 
+function applyField(t){   // write one edited field into the trip; returns 'num' (totals change, re-render on commit), 'text', or ''
+  const d=t.dataset, num=()=>Number(t.value)||0;
+  if(d.min){ const [pid,cid]=d.min.split('>'), e=node(cid)?.parents[pid]; if(e) e.minutes=t.value===''?null:Number(t.value); return 'num'; }
+  if(d.days){ place(d.days).days=num(); return 'num'; }
+  if(d.ahours){ findAttr(d.ahours).hours=num(); return 'num'; }
+  if(d.aticket){ findAttr(d.aticket).ticket=num(); return 'num'; }
+  if(d.hotel){ place(d.hotel).hotel=num(); return 'num'; }
+  if(d.food){ place(d.food).food=num(); return 'num'; }
+  if(d.note){ place(d.note).note=t.value; return 'text'; }
+  if(d.aname){ findAttr(d.aname).name=t.value; return 'text'; }
+  if(d.adesc){ findAttr(d.adesc).desc=t.value; return 'text'; }
+  if(t.id==='trip-title'){ state.title=t.value; return 'text'; }
+  return '';
+}
+// every keystroke goes into the trip and is saved a moment later, so refreshing right after typing loses nothing
+document.body.addEventListener('input',e=>{ if(applyField(e.target)) scheduleSave(); });
 document.body.addEventListener('change',e=>{
   const t=e.target, d=t.dataset;
-  if(d.mode){ const [pid,cid]=d.mode.split('>'); node(cid).parents[pid].mode=t.value; render(); }
-  else if(d.min){ const [pid,cid]=d.min.split('>'); node(cid).parents[pid].minutes=t.value===''?null:Number(t.value); render(); }
-  else if(d.days){ place(d.days).days=Number(t.value)||0; render(); }
-  else if(d.note){ place(d.note).note=t.value; }
-  else if(d.aname){ findAttr(d.aname).name=t.value; }
-  else if(d.adesc){ findAttr(d.adesc).desc=t.value; }
-  else if(d.ahours){ findAttr(d.ahours).hours=Number(t.value)||0; render(); }
-  else if(d.aticket){ findAttr(d.aticket).ticket=Number(t.value)||0; render(); }
-  else if(d.hotel){ place(d.hotel).hotel=Number(t.value)||0; render(); }
-  else if(d.food){ place(d.food).food=Number(t.value)||0; render(); }
-  else if(d.img){ readImg(t.files[0]).then(src=>{ findAttr(d.img).img=src; render(); }); }
-  else if(t.id==='start-date'){ state.startDate=t.value; render(); }
-  else if(t.id==='import-json'){ importJSON(t.files[0]); t.value=''; return; }
-  scheduleSave();
+  if(d.mode){ const [pid,cid]=d.mode.split('>'); node(cid).parents[pid].mode=t.value; render(); return; }
+  if(d.img){ readImg(t.files[0]).then(src=>{ findAttr(d.img).img=src; render(); }); return; }
+  if(t.id==='start-date'){ state.startDate=t.value; render(); return; }
+  if(t.id==='import-json'){ importJSON(t.files[0]); t.value=''; return; }
+  const kind=applyField(t); if(kind==='num') render(); else if(kind) scheduleSave();
+});
+// another tab saved a newer version: take it over quietly (keeping this tab's view) so closing this tab cannot overwrite it
+window.addEventListener('storage',e=>{ if(e.key!==LS_STATE||!booted||!e.newValue) return;
+  let s; try{ s=JSON.parse(e.newValue); }catch(_){ return; } if(!validState(s)||(s.savedAt||0)<=(state.savedAt||0)) return;
+  const view=state.view, cur=state.currentPlaceId;
+  try{ if(s._imagesElsewhere) restoreImages(s,state); s=migrate(s); }catch(_){ return; }
+  s.view=view; if(s.places[cur]) s.currentPlaceId=cur; state=s; fixActivePath(); lastSig=sigOf(state); saveInfo.at=state.savedAt||saveInfo.at; render(true); updateSaveStatus();
 });
 function readImg(file){ return new Promise(res=>{ if(!file) return res(null); const img=new Image(); const fr=new FileReader(); fr.onload=()=>{ img.onload=()=>{ const c=document.createElement('canvas'); const s=Math.min(1,1000/Math.max(img.width,img.height)); c.width=img.width*s; c.height=img.height*s; c.getContext('2d').drawImage(img,0,0,c.width,c.height); res(c.toDataURL('image/jpeg',.82)); }; img.src=fr.result; }; fr.readAsDataURL(file); }); }
 
@@ -1021,16 +1108,34 @@ document.body.addEventListener('submit',e=>{
 document.body.addEventListener('click',e=>{ const id=e.target.closest('button')?.id;
   if(id==='btn-pdf'){ if(staticMap.busy||staticMap.key!==staticMapKey()){ staticMap.printWhenReady=true; toast('地图生成中，好了会自动打开打印'); buildStaticMap(); return; } try{ window.print(); }catch(_){ } }
   else if(id==='btn-export') exportJSON();
-  else if(id==='btn-settings') openSettings();
+  else if(id==='btn-settings'||id==='save-status') openSettings();
 });
 
-/* ============ boot: restore the last autosaved trip and routed legs, else the sample ============ */
+/* ============ boot: load the newest saved copy (localStorage or IndexedDB), else the sample ============ */
 (async function boot(){
-  try{ const [saved,routes]=await Promise.all([DB.get('state'),DB.get('routes')]);
-    if(routes) Object.entries(routes).forEach(([k,v])=>{ if(v&&typeof v==='object') routeCache[k]=v; });
-    if(saved&&saved.nodes&&saved.places&&saved.rootId&&saved.nodes[saved.rootId]) state=migrate(saved);
-  }catch(_){}
-  render();
+  let lsRaw=null, lsState=null, lsSnaps=null, idbState=null, routes=null, idbSnaps=null;
+  try{ localStorage.setItem('waypoint.probe','1'); localStorage.removeItem('waypoint.probe'); saveInfo.lsAvail=true; }catch(_){}
+  try{ lsRaw=localStorage.getItem(LS_STATE); lsState=lsRaw?JSON.parse(lsRaw):null; }catch(_){}
+  try{ lsSnaps=JSON.parse(localStorage.getItem(LS_SNAPS)||'null'); }catch(_){}
+  try{ [idbState,routes,idbSnaps]=await withTimeout(Promise.all([DB.get('state'),DB.get('routes'),DB.get('snapshots')]),4000); saveInfo.idb='ok'; }catch(_){ saveInfo.idb='fail'; }
+  if(routes) Object.entries(routes).forEach(([k,v])=>{ if(v&&typeof v==='object') routeCache[k]=v; });
+  snaps=[idbSnaps,lsSnaps].filter(Array.isArray).sort((a,b)=>(b[0]?.t||0)-(a[0]?.t||0))[0]||[];
+  const cands=[lsState,idbState].filter(validState).sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
+  let loaded=null;
+  for(const c of cands){ try{ const s=JSON.parse(JSON.stringify(c)); if(s._imagesElsewhere) restoreImages(s,idbState,lsState); loaded=migrate(s); break; }catch(e){ console.error('Waypoint: a saved copy could not be read',e); } }
+  if(loaded) state=loaded;
+  else if(lsRaw||idbState){   // something is stored but unreadable: set it aside instead of letting the sample overwrite it
+    try{ localStorage.setItem('waypoint.state.unreadable',lsRaw||JSON.stringify(idbState)); }catch(_){}
+    DB.set('state.unreadable',idbState||lsRaw).catch(()=>{});
+    setTimeout(()=>toast('之前保存的数据读不出来，已另存一份备份，先显示示例行程'),400);
+  }
+  fixActivePath();
+  // both copies identical: nothing to write until the next edit; otherwise write now so localStorage and IndexedDB agree again
+  lastSig=loaded&&lsState&&idbState&&lsState.savedAt===idbState.savedAt?sigOf(state):'';
+  saveInfo.at=loaded?.savedAt||0;
+  booted=true;
+  if(loaded&&Date.now()-(snaps[0]?.t||0)>SNAP_EVERY) takeSnapshot('打开时');
+  render(); requestPersist();
 })();
 </script>
 </body>

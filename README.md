@@ -12,7 +12,7 @@ Sample data: a 7-day National Day self-drive trip from Changsha through southern
 1. **路线树 Route Tree** – a mind-map of possible routes branching from the origin. Click a node to make the path from the root to that node the active plan. The side panel compares every complete route by nights, travel time, km, chosen / TBD attractions and budget.
 2. **行程与地图 Itinerary & Map** – the active plan's stops and legs, a real map (Leaflet) with the routed roads drawn on it, and a per-stop time and money summary.
 3. **站点景点 Stop Detail** – attraction cards for one stop with photo upload, hours, ticket price and a go / TBD / skip decision. Hotel per night and food per day live in the side panel.
-4. **总结导出 Summary** – a print-styled itinerary sheet with a budget breakdown. "导出 PDF" calls the browser print dialog.
+4. **总结导出 Summary** – a print-styled itinerary sheet with a budget breakdown and a static map of the route (map tiles stitched on a canvas in the browser, so it prints as one image). "导出 PDF" calls the browser print dialog.
 
 ## Saving and sharing
 

@@ -236,6 +236,9 @@ input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid v
 .sheet .none{font-size:12px;color:var(--muted);font-style:italic}
 .sheet .note{margin-top:8px;font-size:12px;color:var(--muted);white-space:pre-wrap}
 .sheet .foot{margin-top:24px;padding-top:10px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.sheet .print-map{margin:0 0 22px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface-2);break-inside:avoid}
+.sheet .print-map img,.sheet .print-map svg{display:block;width:100%;height:auto;aspect-ratio:16/10}
+.sheet .print-map .gen{aspect-ratio:16/10;display:grid;place-items:center;color:var(--muted);font-size:13px}
 
 /* ---------- real map (Leaflet), search results, budget ---------- */
 [hidden]{display:none!important}
@@ -673,7 +676,7 @@ function mountMap(){
   if(!leaf){ const el=document.createElement('div'); el.className='leaflet-map'; host.appendChild(el); leaf=L.map(el); leafLayer=L.layerGroup().addTo(leaf); }
   else { host.appendChild(leaf.getContainer()); leaf.invalidateSize(); }
   const t=provider().tiles;
-  if(leafTileKey!==t.url){ if(leafTiles) leafTiles.remove(); leafTiles=L.tileLayer(t.url,{subdomains:t.sub,attribution:t.attr,maxZoom:18}).addTo(leaf); leafTileKey=t.url; }
+  if(leafTileKey!==t.url){ if(leafTiles) leafTiles.remove(); leafTiles=L.tileLayer(t.url,{subdomains:t.sub,attribution:t.attr,maxZoom:18,crossOrigin:'anonymous'}).addTo(leaf); leafTileKey=t.url; }
   leafLayer.clearLayers();
   const ap=activePath(), apSet=new Set(ap), gcj=provider().gcj, accent=cssVar('--accent'), ghost=cssVar('--ghost');
   const LL=p=>gcj?GCJ.fromWgs(p.lat,p.lng):[p.lat,p.lng];   // tiles and routed geometry are both in the provider's datum
@@ -691,6 +694,54 @@ function mountMap(){
       .on('click',()=>{ state.currentPlaceId=p.id; state.view='detail'; render(); }).addTo(leafLayer); });
   const fitKey=used.map(p=>p.id).sort().join(',')+'|'+leafTileKey;
   if(fitKey!==leafFitKey){ leafFitKey=fitKey; const b=L.latLngBounds(used.map(LL)); if(b.isValid()) leaf.fitBounds(b.pad(0.12)); }
+}
+
+/* ---- static map for the summary sheet: tiles stitched on a canvas at print resolution, route and stops drawn on top ---- */
+const staticMap={key:'',url:'',busy:false,printWhenReady:false};
+function staticMapKey(){ return provider().tiles.url+'|'+activePath().map(id=>{ const r=routed(node(id)); return id+':'+(r&&r.geo?r.geo.length:0); }).join(','); }
+function tileXY(lat,lng,z){ const n=2**z, r=lat*Math.PI/180; return [(lng+180)/360*n, (1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n]; }
+function loadTile(url){ return new Promise(res=>{ const img=new Image(); img.crossOrigin='anonymous'; const done=v=>{ clearTimeout(tm); res(v); }; const tm=setTimeout(()=>done(null),12000); img.onload=()=>done(img); img.onerror=()=>done(null); img.src=url; }); }
+async function buildStaticMap(){
+  const key=staticMapKey(); if(staticMap.busy||staticMap.key===key) return; staticMap.busy=true;
+  try{
+    const W=1600,H=1000,PAD=120, ap=activePath(), t=provider().tiles, gcj=provider().gcj;
+    const LL=p=>gcj?GCJ.fromWgs(p.lat,p.lng):[p.lat,p.lng];
+    const legs=ap.map((id,i)=>{ const n=node(id); if(!i) return null; const r=routed(n); return {n, pts:(r&&r.geo&&r.geo.length>1)?r.geo:[LL(place(node(n.parentId).placeId)),LL(place(n.placeId))]}; }).filter(Boolean);
+    const stops=ap.map((id,i)=>({i,p:place(node(id).placeId),ll:LL(place(node(id).placeId))}));
+    const all=stops.map(s=>s.ll).concat(...legs.map(l=>l.pts));
+    // fractional zoom so the route fills the canvas; tiles come from the nearest integer zoom and are scaled to fit
+    const box={minX:1e9,maxX:-1e9,minY:1e9,maxY:-1e9}; for(const p of all){ const [x,y]=tileXY(p[0],p[1],0); if(x<box.minX)box.minX=x; if(x>box.maxX)box.maxX=x; if(y<box.minY)box.minY=y; if(y>box.maxY)box.maxY=y; }
+    const z=Math.min(17,Math.log2(Math.min((W-2*PAD)/Math.max(box.maxX-box.minX,1e-7)/256,(H-2*PAD)/Math.max(box.maxY-box.minY,1e-7)/256)));
+    const zt=Math.max(2,Math.min(18,Math.round(z))), S=256*2**(z-zt), N=2**zt;   // S: size of one zoom-zt tile on the canvas
+    const ox=(box.minX+box.maxX)/2*256*2**z-W/2, oy=(box.minY+box.maxY)/2*256*2**z-H/2;
+    const X=ll=>tileXY(ll[0],ll[1],0)[0]*256*2**z-ox, Y=ll=>tileXY(ll[0],ll[1],0)[1]*256*2**z-oy;
+    const c=document.createElement('canvas'); c.width=W; c.height=H; const g=c.getContext('2d'); g.imageSmoothingQuality='high';
+    g.fillStyle='#E9EEF2'; g.fillRect(0,0,W,H);
+    const jobs=[]; for(let tx=Math.floor(ox/S);tx<=Math.floor((ox+W)/S);tx++) for(let ty=Math.max(0,Math.floor(oy/S));ty<=Math.min(N-1,Math.floor((oy+H)/S));ty++){
+      const url=t.url.replace('{z}',zt).replace('{x}',((tx%N)+N)%N).replace('{y}',ty).replace('{s}',t.sub[Math.abs(tx+ty)%t.sub.length]);
+      jobs.push(loadTile(url).then(img=>{ if(img) g.drawImage(img,tx*S-ox,ty*S-oy,S+0.5,S+0.5); })); }
+    await Promise.all(jobs);
+    // route: white halo then accent line
+    g.lineCap='round'; g.lineJoin='round';
+    for(const pass of [['rgba(255,255,255,.85)',13],['#0F6E8C',7]]){ g.strokeStyle=pass[0]; g.lineWidth=pass[1];
+      legs.forEach(l=>{ g.beginPath(); l.pts.forEach((p,i)=>g[i?'lineTo':'moveTo'](X(p),Y(p))); g.stroke(); }); }
+    // leg time pills
+    g.font='500 22px "IBM Plex Mono",Menlo,monospace'; g.textBaseline='middle';
+    legs.forEach(l=>{ const mid=l.pts[Math.floor(l.pts.length/2)], txt=`${MODES[l.n.mode].icon} ${fmtMin(edgeMinutes(l.n))}`, w=g.measureText(txt).width+26, x=X(mid), y=Y(mid);
+      g.fillStyle='#fff'; g.strokeStyle='#D5DDE4'; g.lineWidth=2; g.beginPath(); g.roundRect(x-w/2,y-19,w,38,19); g.fill(); g.stroke(); g.fillStyle='#182230'; g.textAlign='center'; g.fillText(txt,x,y+1); });
+    // stops: numbered pins with name labels; stops at the same coordinates (origin and return) share one pin
+    const groups=new Map(); stops.forEach(s=>{ const k=s.ll[0].toFixed(5)+','+s.ll[1].toFixed(5); if(!groups.has(k)) groups.set(k,{ll:s.ll,idx:[],name:s.p.name.split(' ')[0],origin:false}); const gp=groups.get(k); gp.idx.push(s.i||'S'); if(!s.i) gp.origin=true; });
+    groups.forEach(gp=>{ const x=X(gp.ll), y=Y(gp.ll), txt=gp.idx.join('/');
+      g.beginPath(); g.arc(x,y,24,0,Math.PI*2); g.fillStyle=gp.origin?'#D9961E':'#0F6E8C'; g.fill(); g.lineWidth=5; g.strokeStyle='#fff'; g.stroke();
+      g.fillStyle='#fff'; g.font=`500 ${txt.length>2?17:23}px "IBM Plex Mono",Menlo,monospace`; g.textAlign='center'; g.fillText(txt,x,y+1);
+      const right=x<W*0.72, lx=right?x+32:x-32;   // labels flip to the left near the right edge so they are not clipped
+      g.font='700 28px "Manrope","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif'; g.textAlign=right?'left':'right'; g.lineWidth=8; g.strokeStyle='rgba(255,255,255,.95)'; g.strokeText(gp.name,lx,y); g.fillStyle='#182230'; g.fillText(gp.name,lx,y); });
+    // attribution
+    g.font='500 20px "Manrope",sans-serif'; g.textAlign='right'; const at=t.attr, aw=g.measureText(at).width+20; g.fillStyle='rgba(255,255,255,.85)'; g.fillRect(W-aw,H-34,aw,34); g.fillStyle='#5F6E7C'; g.fillText(at,W-10,H-17);
+    staticMap.url=c.toDataURL('image/jpeg',.9);
+  }catch(e){ staticMap.url=''; }
+  staticMap.key=key; staticMap.busy=false;
+  if(state.view==='summary'){ render(true); if(staticMap.printWhenReady){ staticMap.printWhenReady=false; setTimeout(()=>{ try{ window.print(); }catch(_){ } },400); } }
 }
 
 function renderPlan(){
@@ -796,6 +847,7 @@ function renderSummary(){
     <div class="strip">${ap.map((id,i)=>{ const n=node(id), p=place(n.placeId); return `${i?`<span class="l"><span>${MODES[n.mode].icon} ${MODES[n.mode].label}</span><span>${fmtMin(edgeMinutes(n))}</span></span>`:''}<span class="s ${i?'':'origin'}"><i>${i||'S'}</i>${esc(p.name.split(' ')[0])}</span>`; }).join('')}</div>
     <div class="totals"><div><b>${m.days}</b><span>晚</span></div><div><b>${fmtMin(m.travel)}</b><span>在途时间</span></div><div><b>${Math.round(m.km)} km</b><span>总里程</span></div><div><b>${m.go}</b><span>已选景点 · ${m.hours}h</span></div></div>
     <div class="budget"><div><b>${yuan(c.total)}</b><span>预算合计</span></div><div><b>${yuan(c.drive+c.tolls)}</b><span>驾车 ${Math.round(m.km)} km${c.tolls?' 含过路费':''}</span></div><div><b>${yuan(c.hotel)}</b><span>住宿 ${m.days} 晚</span></div><div><b>${yuan(c.food)}</b><span>餐饮</span></div><div><b>${yuan(c.tickets)}</b><span>门票 ${m.go} 个景点</span></div></div>
+    <figure class="print-map">${staticMap.key===staticMapKey()?(staticMap.url?`<img src="${staticMap.url}" alt="路线地图">`:schematicSvg()):'<div class="gen">地图生成中…</div>'}</figure>
     ${ap.map((id,i)=>{ const n=node(id), p=place(n.placeId); const nights=Number(p.days)||0, d0=day, span=nights>0?Math.ceil(nights):0, last=i===ap.length-1; day+=span;   // a 0-night stop shares its day with the next stop
       const go=p.attractions.filter(a=>a.decision==='go'), tbd=p.attractions.filter(a=>a.decision==='tbd');
       const when=(i===0&&!span)?`<b>出发</b>${start?fmtDate(d0):''}`:`<b>Day ${d0}${span>1?'–'+(d0+span-1):''}</b>${start?`${fmtDate(d0)}${span>1?' – '+fmtDate(d0+span-1):''}<br>`:''}${nights>0?p.days+' 天停留':last?'到达，行程结束':'途经，不过夜'}`;
@@ -809,6 +861,7 @@ function renderSummary(){
         </div></section>`; }).join('')}
     <div class="foot"><span>Waypoint 路书 · 时间为估算，以实际时刻表为准</span><span>${new Date().toLocaleDateString('zh-CN')}</span></div>
   </article>`;
+  buildStaticMap();
 }
 
 /* ============ modal ============ */
@@ -922,7 +975,7 @@ document.body.addEventListener('submit',e=>{
   readImg(f.querySelector('#na-img').files[0]).then(src=>{ a.img=src; p.attractions.push(a); toast('已添加景点'); render(); });
 });
 document.body.addEventListener('click',e=>{ const id=e.target.closest('button')?.id;
-  if(id==='btn-pdf'){ try{ window.print(); }catch(_){ } }
+  if(id==='btn-pdf'){ if(staticMap.busy||staticMap.key!==staticMapKey()){ staticMap.printWhenReady=true; toast('地图生成中，好了会自动打开打印'); buildStaticMap(); return; } try{ window.print(); }catch(_){ } }
   else if(id==='btn-export') exportJSON();
   else if(id==='btn-settings') openSettings();
 });

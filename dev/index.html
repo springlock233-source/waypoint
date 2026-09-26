@@ -1,0 +1,1184 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Waypoint 路书</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%230F6E8C'/%3E%3Cpath d='M9 20 L15 10 L19 17 L23 12' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+:root{
+  --bg:#F3F6F8; --surface:#FFFFFF; --surface-2:#E9EEF2; --ink:#182230; --muted:#5F6E7C;
+  --line:#D5DDE4; --accent:#0F6E8C; --accent-ink:#FFFFFF; --accent-soft:#DDEFF5;
+  --amber:#D9961E; --amber-soft:#FBEFD6; --good:#2E8B57; --good-soft:#DCF2E5; --bad:#B54141; --bad-soft:#F6DEDE;
+  --ghost:#B5C2CC; --shadow:0 1px 2px rgba(24,34,48,.06),0 6px 20px rgba(24,34,48,.06);
+  --sans:"Manrope","Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0F151B; --surface:#171F27; --surface-2:#1F2932; --ink:#E5ECF2; --muted:#95A5B3;
+    --line:#2A3641; --accent:#4DB4D3; --accent-ink:#0B1218; --accent-soft:#133440;
+    --amber:#E5AE45; --amber-soft:#3A2E14; --good:#57B37F; --good-soft:#153524; --bad:#D96B6B; --bad-soft:#3D1D1D;
+    --ghost:#3E4C58; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0F151B; --surface:#171F27; --surface-2:#1F2932; --ink:#E5ECF2; --muted:#95A5B3;
+  --line:#2A3641; --accent:#4DB4D3; --accent-ink:#0B1218; --accent-soft:#133440;
+  --amber:#E5AE45; --amber-soft:#3A2E14; --good:#57B37F; --good-soft:#153524; --bad:#D96B6B; --bad-soft:#3D1D1D;
+  --ghost:#3E4C58; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+h1,h2,h3,h4{margin:0;text-wrap:balance;line-height:1.25}
+input,select,textarea{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 8px;min-width:0}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700}
+
+/* ---------- top bar ---------- */
+.topbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--surface);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:10px 20px;flex-wrap:wrap}
+.brand{display:flex;align-items:baseline;gap:8px;font-weight:800;letter-spacing:-.01em}
+.brand small{font-weight:500;color:var(--muted)}
+.trip-title{border:none;background:transparent;font-weight:700;font-size:16px;padding:4px 6px;border-radius:6px;flex:0 1 260px;min-width:120px}
+.trip-title:hover{background:var(--surface-2)}
+.tabs{display:flex;gap:4px;background:var(--surface-2);padding:4px;border-radius:10px}
+.tab{border:none;background:transparent;padding:6px 12px;border-radius:7px;font-weight:600;color:var(--muted);display:flex;gap:8px;align-items:center}
+.tab .k{font-family:var(--mono);font-size:11px;background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:0 5px;color:var(--muted)}
+.tab.active{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.tab.active .k{border-color:var(--accent);color:var(--accent)}
+.topbar .active-plan{font-size:12px;color:var(--muted);flex:1 1 160px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar .active-plan b{color:var(--ink)}
+
+.view{display:none;padding:20px;max-width:1500px;margin:0 auto}
+.view.on{display:block}
+
+/* ---------- generic ---------- */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:6px 12px;font-weight:600;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.small{padding:3px 8px;font-size:12px}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.btn.ghost:hover{background:var(--surface-2);color:var(--ink)}
+.btn.danger{color:var(--bad)}
+.chip{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:1px 8px;font-size:12px;font-weight:600;background:var(--surface-2);color:var(--muted)}
+.chip.go{background:var(--good-soft);color:var(--good)}
+.chip.skip{background:var(--bad-soft);color:var(--bad)}
+.chip.tbd{background:var(--amber-soft);color:var(--amber)}
+.chip.accent{background:var(--accent-soft);color:var(--accent)}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:11px;color:var(--muted);font-weight:600}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.muted{color:var(--muted)}
+.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.section-head h2{font-size:18px;font-weight:800;letter-spacing:-.01em}
+.section-head p{margin:0;color:var(--muted);font-size:13px;max-width:60ch}
+.hint{font-size:12px;color:var(--muted)}
+
+/* ---------- tree view ---------- */
+.tree-layout{display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start}
+.tree-scroll{overflow:auto;padding:16px;background:
+  linear-gradient(var(--line) 1px,transparent 1px) 0 0/40px 40px,
+  linear-gradient(90deg,var(--line) 1px,transparent 1px) 0 0/40px 40px,var(--surface);
+  background-blend-mode:normal;border:1px solid var(--line);border-radius:10px;min-height:420px}
+.tree-canvas{position:relative}
+.tree-canvas svg{position:absolute;inset:0;overflow:visible}
+.tnode{position:absolute;width:210px;background:var(--surface);border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;box-shadow:var(--shadow);cursor:pointer;transition:border-color .15s,transform .15s}
+.tnode:hover{transform:translateY(-1px)}
+.tnode.on{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft),var(--shadow)}
+.tnode.root{border-style:solid;border-color:var(--amber)}
+.tnode .tn-head{display:flex;align-items:center;gap:8px}
+.tnode .step{font-family:var(--mono);font-size:11px;color:var(--muted);background:var(--surface-2);border-radius:4px;padding:1px 5px}
+.tnode.on .step{background:var(--accent);color:var(--accent-ink)}
+.tnode .name{font-weight:700;flex:1;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tnode .check{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-size:11px;color:transparent}
+.tnode.on .check{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.tnode .tn-edge{display:flex;gap:6px;margin-top:8px}
+.tnode .tn-from{font-size:11px;color:var(--muted);margin-top:6px;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tnode .tn-from+.tn-edge{margin-top:2px}
+.tnode .tn-edge .btn{padding:2px 5px}
+.tnode .tn-edge select,.tnode .tn-edge input{padding:3px 6px;font-size:12px;border-radius:5px}
+.tnode .tn-edge input{width:64px}
+.tnode .tn-foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:6px}
+.tnode .tn-foot .days{font-size:12px;color:var(--muted);white-space:nowrap}
+.edge-label{font-family:var(--mono);font-size:11px;fill:var(--ink)}
+.edge-pill{position:absolute;transform:translate(-50%,-50%);z-index:1;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:1px 3px 1px 9px;font-family:var(--mono);font-size:11px;line-height:18px;color:var(--ink);white-space:nowrap}
+.edge-pill i{font-style:normal;width:17px;height:17px;border-radius:50%;display:grid;place-items:center;background:var(--surface-2);color:var(--muted);font-family:var(--sans);font-size:12px;line-height:1}
+.edge-pill:hover,.edge-pill:focus-visible{border-color:var(--accent)}
+.edge-pill:hover i,.edge-pill:focus-visible i{background:var(--accent);color:var(--accent-ink)}
+.leg .ins-btn{align-self:flex-start;padding:2px 6px;margin-left:-6px}
+.dev .topbar{box-shadow:inset 0 -3px 0 var(--amber)}
+.dev .brand small{color:var(--amber);font-weight:800}
+.edge-bg{fill:var(--surface);stroke:var(--line)}
+.edge{fill:none;stroke:var(--ghost);stroke-width:1.5;stroke-dasharray:5 4}
+.edge.on{stroke:var(--accent);stroke-width:2.5;stroke-dasharray:none}
+.compare{display:flex;flex-direction:column;gap:10px}
+.plan{padding:12px 14px;display:flex;flex-direction:column;gap:8px;cursor:pointer;border-width:1.5px}
+.plan.on{border-color:var(--accent);background:var(--accent-soft)}
+.plan .route{font-weight:700;font-size:13px;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.plan .route .arrow{color:var(--muted);font-weight:400}
+.plan .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.plan .metric b{display:block;font-family:var(--mono);font-size:15px;font-weight:500}
+.plan .metric span{font-size:11px;color:var(--muted)}
+.plan .adopt{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600}
+
+/* ---------- planner view ---------- */
+.planner{display:grid;grid-template-columns:320px minmax(0,1fr) 340px;gap:16px;align-items:start}
+.panel{padding:14px}
+.panel h3{font-size:13px;font-weight:800;letter-spacing:.02em;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+.stop-list{display:flex;flex-direction:column;gap:0}
+.stop{display:grid;grid-template-columns:24px 1fr;gap:10px;padding:8px 0}
+.stop .dot{width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-family:var(--mono);font-size:11px;display:grid;place-items:center;font-weight:500;margin-top:2px}
+.stop.origin .dot{background:var(--amber)}
+.stop .body{display:flex;flex-direction:column;gap:6px;min-width:0}
+.stop .title{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.stop .title b{font-size:14px}
+.stop .sub{font-size:12px;color:var(--muted)}
+.stop .ctrls{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.stop .ctrls input,.stop .ctrls select{padding:4px 6px;font-size:12px}
+.leg{display:grid;grid-template-columns:24px 1fr;gap:10px}
+.leg .rail{display:flex;justify-content:center}
+.leg .rail i{width:2px;background:var(--line);min-height:52px;display:block}
+.leg .box{background:var(--surface-2);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:6px}
+.leg .box .row{gap:6px}
+.leg select,.leg input{padding:4px 6px;font-size:12px}
+.leg input{width:74px}
+.leg .est{font-size:12px;color:var(--muted)}
+.mapwrap{padding:12px}
+.map{width:100%;aspect-ratio:16/11;max-width:100%;display:block;background:var(--surface-2);border-radius:8px}
+.map .grid{stroke:var(--line);stroke-width:1}
+.map .route{fill:none;stroke:var(--accent);stroke-width:3;stroke-linecap:round}
+.map .alt{fill:none;stroke:var(--ghost);stroke-width:1.5;stroke-dasharray:4 4}
+.map .pt{fill:var(--accent);stroke:var(--surface);stroke-width:2.5}
+.map .pt.origin{fill:var(--amber)}
+.map .pt.ghost{fill:var(--ghost);stroke:none}
+.map .lbl{font-size:12px;font-weight:700;fill:var(--ink);font-family:var(--sans)}
+.map .lbl.ghost{fill:var(--muted);font-weight:500}
+.map .n{font-family:var(--mono);font-size:9px;fill:var(--accent-ink);text-anchor:middle;font-weight:500}
+.map .leglbl{font-family:var(--mono);font-size:10px;fill:var(--ink);text-anchor:middle}
+.map .leglbl-bg{fill:var(--surface);opacity:.92}
+.map-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+.stats{display:flex;gap:18px;flex-wrap:wrap}
+.stats div b{display:block;font-family:var(--mono);font-size:18px;font-weight:500}
+.stats div span{font-size:11px;color:var(--muted)}
+.sum-stop{padding:10px 0;border-top:1px solid var(--line)}
+.sum-stop:first-child{border-top:none;padding-top:0}
+.sum-stop .h{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.sum-stop .h b{font-size:14px}
+.sum-stop ul{list-style:none;padding:0;margin:6px 0 0;display:flex;flex-direction:column;gap:3px}
+.sum-stop li{display:flex;justify-content:space-between;gap:8px;font-size:13px}
+.sum-stop li.skip{color:var(--muted);text-decoration:line-through}
+.sum-stop li .t{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.bar{height:6px;background:var(--surface-2);border-radius:3px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--accent)}
+.bar i.over{background:var(--bad)}
+
+/* ---------- stop detail ---------- */
+.detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.detail-head h2{font-size:26px;font-weight:800;letter-spacing:-.02em}
+.detail-head .coords{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.stop-nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.stop-nav .btn.on{border-color:var(--accent);color:var(--accent)}
+.detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
+.attr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.attr{overflow:hidden;display:flex;flex-direction:column}
+.attr .img{aspect-ratio:4/3;max-width:100%;background:var(--surface-2);position:relative;display:grid;place-items:center;color:var(--muted);font-size:12px;overflow:hidden}
+.attr .img img{width:100%;height:100%;object-fit:cover;display:block}
+.attr .img label{position:absolute;right:8px;bottom:8px}
+.attr .img input[type=file]{display:none}
+.attr .ab{padding:10px 12px;display:flex;flex-direction:column;gap:6px;flex:1}
+.attr .ab input,.attr .ab textarea{border-color:transparent;background:transparent;padding:2px 4px;border-radius:4px}
+.attr .ab input:hover,.attr .ab textarea:hover{background:var(--surface-2)}
+.attr .ab input.name{font-weight:700;font-size:15px}
+.attr .ab textarea{resize:vertical;min-height:52px;font-size:13px;line-height:1.45}
+.attr .meta{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.attr .meta input{width:56px;text-align:right;font-family:var(--mono)}
+.attr .decide{display:flex;gap:6px;margin-top:auto}
+.dbtn{flex:1;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:6px;font-weight:700;font-size:12px}
+.dbtn.go.on{background:var(--good-soft);border-color:var(--good);color:var(--good)}
+.dbtn.skip.on{background:var(--bad-soft);border-color:var(--bad);color:var(--bad)}
+.attr.skip{opacity:.55}
+.attr.go{border-color:var(--good)}
+.add-attr{padding:14px;display:flex;flex-direction:column;gap:10px;border-style:dashed}
+.side-info{padding:14px;display:flex;flex-direction:column;gap:10px}
+.side-info textarea{min-height:90px;resize:vertical}
+.side-info .kv{display:flex;justify-content:space-between;font-size:13px}
+.side-info .kv b{font-family:var(--mono);font-weight:500}
+
+/* ---------- summary (print) ---------- */
+.summary-tools{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.sheet{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:40px 44px;max-width:900px;margin:0 auto;box-shadow:var(--shadow)}
+.sheet .masthead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;border-bottom:3px solid var(--ink);padding-bottom:14px;margin-bottom:18px;flex-wrap:wrap}
+.sheet .masthead h1{font-size:32px;font-weight:800;letter-spacing:-.025em}
+.sheet .masthead .sub{color:var(--muted);font-size:13px}
+.sheet .strip{display:flex;align-items:center;flex-wrap:wrap;gap:6px 0;margin-bottom:20px}
+.sheet .strip .s{display:inline-flex;align-items:center;gap:6px;font-weight:700}
+.sheet .strip .s i{width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-family:var(--mono);font-size:11px;font-style:normal;display:grid;place-items:center}
+.sheet .strip .s.origin i{background:var(--amber)}
+.sheet .strip .l{display:inline-flex;flex-direction:column;align-items:center;padding:0 10px;font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.2}
+.sheet .strip .l:before{content:"";display:block;width:56px;height:2px;background:var(--line);margin-bottom:3px}
+.sheet .totals{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:26px}
+.sheet .totals div{border-top:1px solid var(--line);padding-top:8px}
+.sheet .totals b{display:block;font-family:var(--mono);font-size:20px;font-weight:500}
+.sheet .totals span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.sheet .day{display:grid;grid-template-columns:110px 1fr;gap:18px;padding:18px 0;border-top:1px solid var(--line);break-inside:avoid}
+.sheet .day .when{font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.6}
+.sheet .day .when b{display:block;font-size:20px;color:var(--ink);font-weight:500;font-family:var(--sans)}
+.sheet .day h3{font-size:18px;font-weight:800;margin-bottom:4px}
+.sheet .arrive{font-size:12px;color:var(--muted);margin-bottom:10px}
+.sheet .picks{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.sheet .pick{display:grid;grid-template-columns:64px 1fr;gap:10px;align-items:start}
+.sheet .pick .th{width:64px;height:48px;border-radius:6px;background:var(--surface-2);overflow:hidden}
+.sheet .pick .th img{width:100%;height:100%;object-fit:cover;display:block}
+.sheet .pick b{font-size:13px;display:block}
+.sheet .pick p{margin:2px 0 0;font-size:12px;color:var(--muted);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sheet .pick .t{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.sheet .none{font-size:12px;color:var(--muted);font-style:italic}
+.sheet .note{margin-top:8px;font-size:12px;color:var(--muted);white-space:pre-wrap}
+.sheet .foot{margin-top:24px;padding-top:10px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.sheet .print-map{margin:0 0 22px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface-2);break-inside:avoid}
+.sheet .print-map img,.sheet .print-map svg{display:block;width:100%;height:auto;aspect-ratio:16/10}
+.sheet .print-map .gen{aspect-ratio:16/10;display:grid;place-items:center;color:var(--muted);font-size:13px}
+
+/* ---------- real map (Leaflet), search results, budget ---------- */
+[hidden]{display:none!important}
+.topbar .tools{display:flex;gap:6px;align-items:center}
+.leaflet-map{width:100%;aspect-ratio:16/11;border-radius:8px;background:var(--surface-2);position:relative;z-index:0}
+.leaflet-container{font-family:var(--sans)}
+.pin{width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-family:var(--mono);font-size:11px;font-weight:500;display:grid;place-items:center;border:2px solid var(--surface);box-shadow:var(--shadow);cursor:pointer}
+.pin.origin{background:var(--amber)}
+.pin.ghost{width:14px;height:14px;background:var(--ghost);cursor:default}
+.leaflet-tooltip.pin-lbl{background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-weight:700;font-size:12px;box-shadow:none}
+.leaflet-tooltip.pin-lbl.ghost{color:var(--muted);font-weight:500}
+.leaflet-tooltip.pin-lbl:before{display:none}
+.leg-tip-wrap{background:none;border:none}
+.leg-tip{display:inline-block;transform:translate(-50%,-50%);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:1px 7px;font-family:var(--mono);font-size:11px;color:var(--ink);white-space:nowrap;box-shadow:var(--shadow)}
+.results{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow:auto}
+.results button{text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:6px 8px;font-size:12px;color:var(--muted)}
+.results button b{display:block;font-size:13px;color:var(--ink)}
+.results button.on{border-color:var(--accent);background:var(--accent-soft)}
+.save-status{border:none;background:none;font-size:12px;color:var(--muted);padding:3px 6px;border-radius:6px;white-space:nowrap}
+.save-status:hover{background:var(--surface-2);color:var(--ink)}
+.save-status.warn{color:var(--bad);font-weight:700}
+.save-box{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);padding-top:10px}
+.save-box .kv{display:flex;justify-content:space-between;gap:10px;font-size:12px}
+.save-box .kv span:first-child{color:var(--muted);white-space:nowrap}
+.snaps{display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto}
+.snap{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;padding:4px 4px 4px 8px;border:1px solid var(--line);border-radius:6px}
+.snap span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.budget{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:0 0 20px;padding:12px 14px;background:var(--surface-2);border-radius:8px}
+.budget div b{display:block;font-family:var(--mono);font-size:16px;font-weight:500}
+.budget div span{font-size:11px;color:var(--muted)}
+.side-info .row .field{flex:1}
+.attr .meta input.ticket{width:64px}
+
+/* ---------- modal ---------- */
+.modal-bg{position:fixed;inset:0;background:rgba(10,16,22,.45);display:grid;place-items:center;z-index:50;padding:16px}
+.modal{background:var(--surface);border-radius:12px;padding:20px;width:100%;max-width:440px;max-height:calc(100vh - 32px);overflow:auto;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px}
+.modal h3{font-size:16px;font-weight:800}
+.modal .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.seg{display:flex;background:var(--surface-2);border-radius:8px;padding:3px}
+.seg button{flex:1;border:none;background:transparent;border-radius:6px;padding:5px;font-weight:600;color:var(--muted)}
+.seg button.on{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;z-index:60;box-shadow:var(--shadow)}
+
+@media (max-width:1100px){
+  .planner{grid-template-columns:1fr 1fr}
+  .planner .col-map{grid-column:1/-1;order:-1}
+}
+@media (max-width:900px){
+  .tree-layout,.planner,.detail-grid{grid-template-columns:1fr}
+  .sheet{padding:24px 18px}
+  .sheet .totals{grid-template-columns:repeat(2,1fr)}
+  .sheet .day{grid-template-columns:1fr;gap:6px}
+}
+@media (max-width:600px){
+  .view{padding:12px 16px}
+  .topbar{padding:8px 16px}
+  .tab span.t{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+@media print{
+  @page{margin:14mm}
+  body{background:#fff;color:#111}
+  .topbar,.summary-tools,.view:not(#v-summary){display:none!important}
+  #v-summary{display:block!important;padding:0}
+  .sheet{border:none;box-shadow:none;padding:0;max-width:none;background:#fff}
+  .sheet .day{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Waypoint <small>路书</small></div>
+  <input id="trip-title" class="trip-title" aria-label="行程名称">
+  <nav class="tabs" id="tabs">
+    <button class="tab" data-view="tree"><span class="k">1</span><span class="t">路线树</span></button>
+    <button class="tab" data-view="plan"><span class="k">2</span><span class="t">行程与地图</span></button>
+    <button class="tab" data-view="detail"><span class="k">3</span><span class="t">站点景点</span></button>
+    <button class="tab" data-view="summary"><span class="k">4</span><span class="t">总结导出</span></button>
+  </nav>
+  <div class="active-plan" id="active-plan"></div>
+  <div class="tools"><button type="button" class="save-status" id="save-status"></button><label class="btn small" title="导入 Waypoint JSON 文件">导入<input type="file" accept=".json,application/json" id="import-json" hidden></label><button class="btn small" id="btn-export" title="导出为 JSON 文件，发给朋友">导出</button><button class="btn small" id="btn-settings">⚙ 设置</button></div>
+</header>
+
+<section class="view" id="v-tree"></section>
+<section class="view" id="v-plan"></section>
+<section class="view" id="v-detail"></section>
+<section class="view" id="v-summary"></section>
+<div id="modal-root"></div>
+
+<script>
+/* ============ data ============ */
+const MODES = {
+  drive:{label:'驾车',icon:'🚗',kmh:85,factor:1.35,overhead:0,gm:'driving'},
+  train:{label:'火车',icon:'🚆',kmh:105,factor:1.25,overhead:20,gm:'transit'},
+  bus:{label:'大巴',icon:'🚌',kmh:62,factor:1.3,overhead:15,gm:'transit'},
+  plane:{label:'飞机',icon:'✈',kmh:760,factor:1.05,overhead:150,gm:'driving'},
+  boat:{label:'船',icon:'⛴',kmh:28,factor:1.1,overhead:20,gm:'transit'},
+  walk:{label:'步行',icon:'🚶',kmh:4.5,factor:1.3,overhead:0,gm:'walking'},
+};
+let _uid = 1;
+const uid = (p='id') => p + '_' + (_uid++) + '_' + Math.random().toString(36).slice(2,6);
+
+function sampleState(){
+  const P = (name,lat,lng,days,note,attractions)=>({id:uid('p'),name,lat,lng,days,note,attractions});
+  const A = (name,desc,hours,decision,img=null)=>({id:uid('a'),name,desc,hours,decision,img});
+  const changsha = P('长沙',28.2282,112.9388,0,'10/1 早上全国高速最堵，6 点前出发。7 座以下小客车国庆高速免费（以官方通知为准）。',[]);
+  const dongjiang = P('郴州·东江湖',26.00,113.33,1,'住资兴东江湖边，第二天一早进景区看雾。',[
+    A('高椅岭','4A，丹霞配绿水，离东江湖 28 km，适合徒步 2–3 小时。仍在开发中，出发前查当天是否开放或管制。',3,'go'),
+    A('雾漫小东江','5A 东江湖核心景点。最佳观雾 6:30–8:30，2 号桥到 4 号桥之间栈道。只看小东江买 A 线票（85 元）即可。10 月初仍在雾季，但不保证每天有雾。',2,'go'),
+    A('飞天山','4A，与高椅岭同为丹霞地貌、设施更完善。D1 时间有限，与高椅岭二选一。',3,'skip'),
+    A('苏仙岭','4A，郴州市区免费小山，三绝碑（秦观词、苏轼跋、米芾字）。路过有空停 1 小时。',1,'tbd'),
+  ]);
+  const gupo = P('贺州·姑婆山',24.62,111.56,1,'住姑婆山脚或贺州市区（车程约半小时）。靠近广东，节假日广东游客多，要早进山。',[
+    A('姑婆山','4A，森林、溪流、瀑布。8:00 前进山避开人流。',5,'go'),
+    A('秀水状元村（富川）','唐开元年间古村，出过 1 状元 26 进士，有状元楼、古戏台。离贺州约 60 km 基本顺路，D2 下午可停 1–2 小时。',1.5,'tbd'),
+  ]);
+  const huangyao = P('黄姚古镇',24.24,111.20,1,'5A。一定住古镇内，问清楚车停哪里（古镇内一般不能开车进）。10/2–10/3 是一日游高峰，白天人多就回客栈。',[
+    A('黄姚夜景','一日游客散后最美，傍晚开始逛。',2,'go'),
+    A('黄姚清晨古巷','7:00 前晨雾古巷几乎无人。',1.5,'go'),
+  ]);
+  const jinxiu = P('金秀',24.13,110.19,2,'瑶族小城，连住 2 晚不用搬行李，最冷门也最好订。可问圣堂山景区附近有无住宿（看日出）。',[
+    A('圣堂山','4A，桂中第一高峰 1979 m，大瑶山主峰。绝壁栈道和峰林，商业气息淡。长段登山步道，穿好走的鞋。',7,'go'),
+    A('莲花山','金秀另一座峰林景区，如果圣堂山当天状态好可以放弃。',3,'skip'),
+  ]);
+  const maoer = P('猫儿山',25.87,110.42,1,'山顶住宿极少，最难订，最先订。订不到退而求其次住山脚华江，凌晨上山。十月初夜里约 10°C，带外套。',[
+    A('银子岩（荔浦）','4A 溶洞，金秀→猫儿山路上顺路 1–2 小时。',1.5,'go'),
+    A('猫儿山日出 · 星空','4A，华南之巅 2141 m，漓江源头。傍晚看星空，6:00 看日出，天气好有云海。',3,'go'),
+  ]);
+  const xingping = P('兴坪古镇',24.92,110.52,1,'选能看江景/山景、有停车位的客栈。10/6 出游潮回落，人仍多就改遇龙河竹筏。',[
+    A('银子岩（荔浦）','4A 溶洞，金秀→兴坪路上顺路 1–2 小时。',1.5,'go'),
+    A('老寨山日落','傍晚爬上去看漓江，约 1 小时。',1.5,'go'),
+    A('漓江兴坪段 / 遇龙河竹筏','5A 漓江，二选一乘船或竹筏。',3,'tbd'),
+  ]);
+  const yongzhou = P('永州·零陵古城',26.22,111.62,0,'D1 直奔贺州的替代方案：午饭时顺便逛，不住。',[
+    A('柳子街 · 柳子庙','4A 历史文化街区，古城免费，柳子庙单独收票。午饭顺便逛 1–2 小时。',1.5,'tbd'),
+    A('勾蓝瑶寨（江永）','4A，中国历史文化名村，瑶族风格与黄姚不同。要绕出主线。',2,'skip'),
+    A('阳明山（双牌）','4A，主峰 1624 m，上山要大半天，与行程里的山重复。',5,'skip'),
+  ]);
+  const langshan = P('崀山',26.35,110.85,1,'最早那版湘南+桂北环线的第一站。',[
+    A('辣椒峰 · 夫夷江','世界遗产丹霞地貌，比张家界小众。',3,'tbd'),
+    A('八角寨 / 天一巷','第二天上午，二选一。',3,'tbd'),
+  ]);
+  const longji = P('龙胜·龙脊梯田',25.75,110.13,2,'住大寨或平安寨山里民宿，山路窄弯多，不要夜里开。',[
+    A('金坑 · 大寨徒步','国庆前后稻谷金黄，一整天。',6,'tbd'),
+  ]);
+  const back = P('回长沙',28.2282,112.9388,0,'最后一天尽量上午出发，避开返程晚高峰。',[]);
+  const places = {}; [changsha,dongjiang,gupo,huangyao,jinxiu,maoer,xingping,yongzhou,langshan,longji,back].forEach(p=>places[p.id]=p);
+  // 预算占位（¥）：每个过夜站 300/晚 住宿 + 150/天 餐饮；门票只填了备注里明确的一项，其余请按实际填写
+  Object.values(places).forEach(p=>{ p.hotel=p.days>0?300:0; p.food=p.days>0?150:0; p.attractions.forEach(a=>a.ticket=a.name==='雾漫小东江'?85:0); });
+
+  const nodes = {};
+  // minutes 留空 = 用路线服务算出的时间；在任一条边上填数字即可手动覆盖
+  // 一个站点可以有多个「前一站」（分支汇合）：parents[前一站 id] = {mode, minutes}；parentId 是排版时挂在哪个前一站下面
+  const N = (placeId,parentId,mode='drive')=>{ const n={id:uid('n'),placeId,parentId,parents:parentId?{[parentId]:{mode,minutes:null}}:{},children:[]}; nodes[n.id]=n; if(parentId) nodes[parentId].children.push(n.id); return n; };
+  const LINK = (parentId,childId,mode='drive')=>{ nodes[childId].parents[parentId]={mode,minutes:null}; nodes[parentId].children.push(childId); };
+  const root = N(changsha.id,null);
+  // 主方案：郴州 → 贺州 → 黄姚 → 金秀 → 猫儿山 → 长沙
+  const a1 = N(dongjiang.id,root.id);
+  const a2 = N(gupo.id,a1.id);
+  const a3 = N(huangyao.id,a2.id);
+  const a4 = N(jinxiu.id,a3.id);
+  const a5 = N(maoer.id,a4.id);
+  const a6 = N(back.id,a5.id);
+  // D6 替代：金秀 → 兴坪 → 长沙
+  const b5 = N(xingping.id,a4.id);
+  const b6 = N(back.id,b5.id);
+  // D1 替代：走永州直奔贺州，然后汇入主方案的姑婆山——之后的站点共用，不用复制一遍
+  const c1 = N(yongzhou.id,root.id);
+  LINK(c1.id,a2.id);
+  // 最早那版：崀山 → 龙脊 → 兴坪 → 黄姚 → 长沙
+  const d1 = N(langshan.id,root.id);
+  const d2 = N(longji.id,d1.id);
+  const d3 = N(xingping.id,d2.id);
+  const d4 = N(huangyao.id,d3.id);
+  const d5 = N(back.id,d4.id);
+
+  return { title:'国庆 · 湘南桂北 7 天自驾', places, nodes, rootId:root.id, activePath:[root.id,a1.id,a2.id,a3.id,a4.id,a5.id,a6.id], view:'tree', currentPlaceId:dongjiang.id, startDate:'2026-10-01', costPerKm:0.7 };
+}
+
+let state = sampleState();
+
+/* ============ helpers ============ */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const place = id => state.places[id];
+const node = id => state.nodes[id];
+function haversine(a,b){
+  const R=6371, r=Math.PI/180;
+  const dLat=(b.lat-a.lat)*r, dLng=(b.lng-a.lng)*r;
+  const h=Math.sin(dLat/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+/* ---- straight-line fallback estimate ----
+   Short drives wind more and run slower than long expressway legs, so for driving both the
+   detour factor and the speed depend on distance (calibrated against OSRM on the sample legs). */
+function detour(d,mode){ return mode==='drive' ? 1.2+0.4*Math.exp(-d/200) : (MODES[mode]||MODES.drive).factor; }
+function speed(d,mode){ return mode==='drive' ? 60+25*(1-Math.exp(-d/150)) : (MODES[mode]||MODES.drive).kmh; }
+function estMinutes(pa,pb,mode){ const m=MODES[mode]||MODES.drive, d=haversine(pa,pb); return Math.round(d*detour(d,mode)/speed(d,mode)*60 + m.overhead); }
+function estKm(pa,pb,mode){ const d=haversine(pa,pb); return Math.round(d*detour(d,mode)); }
+
+/* ============ settings: this browser only, never part of the exported JSON ============ */
+let settings={amapKey:'',provider:'auto'};
+try{ Object.assign(settings,JSON.parse(localStorage.getItem('waypoint.settings')||'{}')); }catch(_){}
+function saveSettings(){ try{ localStorage.setItem('waypoint.settings',JSON.stringify(settings)); }catch(_){} }
+const useAmap = () => !!settings.amapKey && settings.provider!=='osm';
+
+/* ---- WGS-84 <-> GCJ-02. The app stores WGS-84 (what Google Maps / OSM use); 高德 speaks GCJ-02. ---- */
+const GCJ={ a:6378245, ee:0.00669342162296594323,
+  out(lat,lng){ return lng<72.004||lng>137.8347||lat<0.8293||lat>55.8271; },
+  tLat(x,y){ let r=-100+2*x+3*y+0.2*y*y+0.1*x*y+0.2*Math.sqrt(Math.abs(x)); r+=(20*Math.sin(6*x*Math.PI)+20*Math.sin(2*x*Math.PI))*2/3; r+=(20*Math.sin(y*Math.PI)+40*Math.sin(y/3*Math.PI))*2/3; r+=(160*Math.sin(y/12*Math.PI)+320*Math.sin(y*Math.PI/30))*2/3; return r; },
+  tLng(x,y){ let r=300+x+2*y+0.1*x*x+0.1*x*y+0.1*Math.sqrt(Math.abs(x)); r+=(20*Math.sin(6*x*Math.PI)+20*Math.sin(2*x*Math.PI))*2/3; r+=(20*Math.sin(x*Math.PI)+40*Math.sin(x/3*Math.PI))*2/3; r+=(150*Math.sin(x/12*Math.PI)+300*Math.sin(x/30*Math.PI))*2/3; return r; },
+  fromWgs(lat,lng){ if(this.out(lat,lng)) return [lat,lng]; const rl=lat/180*Math.PI, m=1-this.ee*Math.sin(rl)**2, sm=Math.sqrt(m);
+    let dLat=this.tLat(lng-105,lat-35), dLng=this.tLng(lng-105,lat-35);
+    dLat=dLat*180/((this.a*(1-this.ee))/(m*sm)*Math.PI); dLng=dLng*180/(this.a/sm*Math.cos(rl)*Math.PI); return [lat+dLat,lng+dLng]; },
+  toWgs(lat,lng){ if(this.out(lat,lng)) return [lat,lng]; let wLat=lat,wLng=lng; for(let i=0;i<3;i++){ const [gLat,gLng]=this.fromWgs(wLat,wLng); wLat-=gLat-lat; wLng-=gLng-lng; } return [wLat,wLng]; },
+};
+
+/* ---- map data providers. osm needs no key. amap needs a 高德 Web服务 Key pasted in 设置. ---- */
+const PROVIDER={
+  osm:{ name:'OpenStreetMap + OSRM', gcj:false,
+    tiles:{url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',sub:'abc',attr:'© OpenStreetMap contributors'},
+    canRoute:mode=>mode==='drive',   // the public OSRM server only runs a car profile
+    async route(a,b){ const r=await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=simplified&geometries=geojson`);
+      const rt=(await r.json()).routes?.[0]; if(!rt) return null;
+      return {minutes:Math.round(rt.duration/60),km:Math.round(rt.distance/1000),geo:rt.geometry.coordinates.map(c=>[c[1],c[0]])}; },
+    async search(q){ const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=8&accept-language=zh-CN`);
+      return (await r.json()).map(x=>({name:x.name||x.display_name.split(',')[0].trim(),addr:x.display_name,lat:+x.lat,lng:+x.lon})); },
+  },
+  amap:{ name:'高德地图', gcj:true,
+    tiles:{url:'https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',sub:'1234',attr:'© 高德地图'},
+    canRoute:mode=>mode==='drive'||mode==='walk',
+    async route(a,b,mode){ const [alat,alng]=GCJ.fromWgs(a.lat,a.lng), [blat,blng]=GCJ.fromWgs(b.lat,b.lng);
+      const r=await fetch(`https://restapi.amap.com/v5/direction/${mode==='walk'?'walking':'driving'}?key=${settings.amapKey}&origin=${alng.toFixed(6)},${alat.toFixed(6)}&destination=${blng.toFixed(6)},${blat.toFixed(6)}&show_fields=cost,polyline`);
+      const j=await r.json(); if(j.status!=='1') throw new Error(j.info||'高德返回错误'); const p=j.route?.paths?.[0]; if(!p) return null;
+      const geo=[]; (p.polyline?[p.polyline]:(p.steps||[]).map(s=>s.polyline)).forEach(pl=>(pl||'').split(';').forEach(pt=>{ const [lng,lat]=pt.split(','); if(lat) geo.push([+lat,+lng]); }));
+      return {minutes:Math.round(Number(p.cost?.duration??p.duration)/60),km:Math.round(p.distance/1000),tolls:Number(p.cost?.tolls)||0,geo}; },
+    async search(q){ const r=await fetch(`https://restapi.amap.com/v5/place/text?key=${settings.amapKey}&keywords=${encodeURIComponent(q)}&page_size=8`);
+      const j=await r.json(); if(j.status!=='1') throw new Error(j.info||'高德返回错误');
+      return (j.pois||[]).map(x=>{ const [lng,lat]=x.location.split(',').map(Number); const [wlat,wlng]=GCJ.toWgs(lat,lng); return {name:x.name,addr:[x.pname,x.cityname,x.adname,x.address].filter(Boolean).join(' '),lat:wlat,lng:wlng}; }); },
+  },
+};
+const provider = () => PROVIDER[useAmap()?'amap':'osm'];
+
+/* ---- routed legs: cached per provider + mode + coordinates, persisted in IndexedDB ---- */
+const routeCache={};   // key -> {minutes,km,geo,tolls?} | 'pending' | 'error'
+const routeKey=(a,b,mode)=>`${useAmap()?'amap':'osm'}|${mode}|${a.lat},${a.lng}|${b.lat},${b.lng}`;
+/* legs: a leg is one incoming connection of a node, {pid,cid,mode,minutes}. A node may have several (branches merge). */
+const legOf=(pid,cid)=>{ const c=node(cid), e=c&&c.parents&&c.parents[pid]; return e?{pid,cid,mode:e.mode||'drive',minutes:e.minutes}:null; };
+function allLegs(){ const out=[]; Object.values(state.nodes).forEach(c=>Object.keys(c.parents||{}).forEach(pid=>{ if(node(pid)) out.push(legOf(pid,c.id)); })); return out; }
+const pathLegs = ap => ap.map((id,i)=>i?legOf(ap[i-1],id):null);
+const legPlaces = l => [place(node(l.pid).placeId),place(node(l.cid).placeId)];
+const legRef = l => `${l.pid}>${l.cid}`;   // data-attribute id of a leg; parsed back by the change / click handlers
+function routeState(l){ if(!l||!provider().canRoute(l.mode)) return null; const [a,b]=legPlaces(l); return routeCache[routeKey(a,b,l.mode)]||null; }
+function routed(l){ const r=routeState(l); return r&&typeof r==='object'?r:null; }
+function edgeSource(l){ return (l.minutes!=null&&l.minutes!=='')?'manual':routed(l)?'routed':'est'; }
+const routeQueue=[]; let routing=false, routeRender=null, routeWarned=false;
+function requestRoutes(){   // called after every render; queues any routable edge not yet in the cache
+  allLegs().forEach(l=>{ if(!provider().canRoute(l.mode)) return;
+    const [a,b]=legPlaces(l), k=routeKey(a,b,l.mode);
+    if(routeCache[k]) return; routeCache[k]='pending'; routeQueue.push({k,a,b,mode:l.mode}); });
+  if(!routing&&routeQueue.length) drainRoutes();
+}
+async function drainRoutes(){ routing=true;
+  while(routeQueue.length){ const {k,a,b,mode}=routeQueue.shift();
+    try{ routeCache[k]=(await provider().route(a,b,mode))||'error'; }
+    catch(e){ routeCache[k]='error'; if(!routeWarned){ routeWarned=true; toast('路线服务暂时不可用，先用直线估算 · '+(e.message||'')); } }
+    // re-render (without scrolling) once responses settle, but never while the user is typing in a field
+    clearTimeout(routeRender); routeRender=setTimeout(()=>{ if(!document.activeElement?.matches('input,textarea,select')) render(true); saveRoutes(); },250);
+  }
+  routing=false;
+}
+function saveRoutes(){ const keep={}; Object.entries(routeCache).forEach(([k,v])=>{ if(v&&typeof v==='object') keep[k]=v; }); DB.set('routes',keep).catch(()=>{}); }
+function clearRoutes(){ Object.keys(routeCache).forEach(k=>delete routeCache[k]); routeWarned=false; DB.set('routes',{}).catch(()=>{}); }
+function autoMinutes(l){ const r=routed(l); if(r) return r.minutes; const [a,b]=legPlaces(l); return estMinutes(a,b,l.mode); }
+function edgeMinutes(l){
+  if(!l) return 0;
+  if(l.minutes!=null && l.minutes!=='') return Number(l.minutes);
+  return autoMinutes(l);
+}
+function edgeKm(l){ if(!l) return 0; const r=routed(l); if(r) return r.km; const [a,b]=legPlaces(l); return estKm(a,b,l.mode); }
+function legSourceText(l){ const s=edgeSource(l), r=routed(l), km=edgeKm(l), src=useAmap()?'高德路线':'公路路线', toll=r?.tolls?` · 过路费 ¥${r.tolls}`:'';
+  if(s==='manual') return `手动 ${fmtMin(edgeMinutes(l))} · ${km} km${r?` · ${src}约 ${fmtMin(r.minutes)} <button type="button" class="btn small ghost" data-auto="${legRef(l)}">改用路线时间</button>`:''}`;
+  if(s==='routed') return `${src} ${fmtMin(r.minutes)} · ${km} km${toll}`;
+  return `${routeState(l)==='pending'?'路线计算中…':'直线估算*'} ${fmtMin(edgeMinutes(l))} · 约 ${km} km`;
+}
+function fmtMin(m){ m=Math.round(m); const h=Math.floor(m/60), mm=m%60; return h? `${h}h${mm?String(mm).padStart(2,'0'):''}` : `${mm}min`; }
+
+/* ---- the route graph: every node except the root has one or more parents; the active plan is an explicit path of node ids ---- */
+const activePath = () => state.activePath;
+function ancestors(id){ const seen=new Set(), st=[id]; while(st.length){ const x=st.pop(); Object.keys(node(x)?.parents||{}).forEach(p=>{ if(!seen.has(p)){ seen.add(p); st.push(p); } }); } return seen; }
+function pathTo(id){   // root -> id; at a merge, prefer the parent that is already on the active path
+  const cur=new Set(state.activePath||[]), p=[]; let x=id, guard=0;
+  while(x&&node(x)&&guard++<1000){ p.unshift(x); if(x===state.rootId) break; const ps=Object.keys(node(x).parents||{}); x=ps.find(q=>cur.has(q))||node(x).parentId||ps[0]; }
+  return p;
+}
+function allPaths(){ const out=[]; (function dfs(id,acc){ acc=acc.concat(id); const n=node(id); if(!n.children.length) return out.push(acc); n.children.forEach(c=>dfs(c,acc)); })(state.rootId,[]); return out; }
+function layers(){ const L={}; (function d(id,l){ if((L[id]??-1)>=l) return; L[id]=l; node(id).children.forEach(c=>d(c,l+1)); })(state.rootId,0); return L; }   // tree column = longest path from the root
+function fixActivePath(){   // drop nodes that no longer exist or connect; a spliced-out stop is skipped because its parent now links straight to its child
+  const out=[state.rootId]; (state.activePath||[]).forEach(id=>{ if(id===state.rootId||!node(id)) return; if(node(id).parents?.[out[out.length-1]]) out.push(id); }); state.activePath=out;
+}
+function metrics(pathIds){
+  let travel=0,km=0,days=0,go=0,tbd=0,hours=0; const legs=pathLegs(pathIds);
+  pathIds.forEach((id,i)=>{ const p=place(node(id).placeId), l=legs[i]; if(l){ travel+=edgeMinutes(l); km+=edgeKm(l); } days+=Number(p.days)||0;
+    p.attractions.forEach(a=>{ if(a.decision==='go'){go++;hours+=Number(a.hours)||0;} if(a.decision==='tbd') tbd++; }); });
+  return {travel,km,days,go,tbd,hours,stops:pathIds.length-1};
+}
+/* ---- budget (¥): hotel × nights + food × days + tickets of chosen attractions; per route add driving km × cost/km and 高德 tolls ---- */
+function stopCost(p){ const nights=Number(p.days)||0; return (Number(p.hotel)||0)*nights+(Number(p.food)||0)*Math.ceil(nights)+p.attractions.reduce((s,a)=>s+(a.decision==='go'?Number(a.ticket)||0:0),0); }
+function costOf(pathIds){
+  const c={drive:0,tolls:0,hotel:0,food:0,tickets:0}; const legs=pathLegs(pathIds);
+  pathIds.forEach((id,i)=>{ const p=place(node(id).placeId), l=legs[i]; const nights=Number(p.days)||0;
+    if(l&&l.mode==='drive'){ c.drive+=edgeKm(l)*(Number(state.costPerKm)||0); c.tolls+=routed(l)?.tolls||0; }
+    c.hotel+=(Number(p.hotel)||0)*nights; c.food+=(Number(p.food)||0)*Math.ceil(nights);
+    p.attractions.forEach(a=>{ if(a.decision==='go') c.tickets+=Number(a.ticket)||0; }); });
+  c.total=c.drive+c.tolls+c.hotel+c.food+c.tickets; return c;
+}
+const yuan = v => '¥'+Math.round(v).toLocaleString('zh-CN');
+
+/* ============ persistence ============
+   Every edit is written to localStorage (synchronous; Chrome does not clear it when the disk runs low) and to
+   IndexedDB (room for photos, but Chrome may delete it under storage pressure). On load the newest valid copy wins.
+   Snapshots allow going back; an exported JSON file stays the safest backup.
+   The test copy at …/waypoint/dev/ uses its own "waypoint-dev" names, so trying new features there never touches the real trip. */
+const DEV=/\/dev(\/|\/index\.html)?$/.test(location.pathname), NS=DEV?'waypoint-dev':'waypoint';
+const DB={ _db:null,
+  open(){ if(this._db) return Promise.resolve(this._db); return new Promise((res,rej)=>{ if(!window.indexedDB) return rej(new Error('no indexedDB')); const r=indexedDB.open(NS,1); r.onupgradeneeded=()=>r.result.createObjectStore('kv');
+    r.onsuccess=()=>{ const db=r.result; db.onclose=()=>{ if(this._db===db) this._db=null; }; db.onversionchange=()=>{ db.close(); if(this._db===db) this._db=null; }; this._db=db; res(db); }; r.onerror=()=>rej(r.error); r.onblocked=()=>rej(new Error('blocked')); }); },
+  async tx(mode,fn){ const db=await this.open(); return new Promise((res,rej)=>{ let t; try{ t=db.transaction('kv',mode); }catch(e){ this._db=null; return rej(e); }   // a connection Chrome closed is reopened next time
+    const q=fn(t.objectStore('kv')); t.oncomplete=()=>res(q.result); t.onerror=t.onabort=()=>rej(t.error||new Error('aborted')); }); },
+  get(k){ return this.tx('readonly',s=>s.get(k)); },
+  set(k,v){ return this.tx('readwrite',s=>s.put(v,k)); },
+};
+const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))]);
+const LS_STATE=NS+'.state', LS_SNAPS=NS+'.snapshots', SNAP_EVERY=10*60*1000, SNAP_MAX=12;
+async function readMainTrip(){   // test copy only: a read-only copy of the real trip from the "waypoint" storage
+  let ls=null, idb=null;
+  try{ ls=JSON.parse(localStorage.getItem('waypoint.state')||'null'); }catch(_){}
+  try{ idb=await withTimeout(new Promise((res,rej)=>{ const r=indexedDB.open('waypoint');
+    r.onupgradeneeded=()=>r.transaction.abort();   // the real database does not exist: never create it from here
+    r.onerror=()=>rej(r.error);
+    r.onsuccess=()=>{ const db=r.result; try{ const q=db.transaction('kv').objectStore('kv').get('state'); q.onsuccess=()=>{ res(q.result); db.close(); }; q.onerror=()=>{ rej(q.error); db.close(); }; }catch(e){ db.close(); rej(e); } }; }),3000); }catch(_){}
+  const c=[ls,idb].filter(validState).sort((a,b)=>(b.savedAt||0)-(a.savedAt||0))[0]; if(!c) return null;
+  const s=JSON.parse(JSON.stringify(c)); if(s._imagesElsewhere) restoreImages(s,idb,ls); return s;
+}
+let booted=false, saveT=null, lastSig='', snaps=[];   // snaps: [{t,label,title,stops,state}], newest first
+const saveInfo={at:0,ls:'',idb:'',lsAvail:false,persisted:null};
+const sigOf = s => JSON.stringify(s,(k,v)=>k==='savedAt'?undefined:v);
+const validState = s => !!(s&&typeof s==='object'&&s.nodes&&s.places&&s.rootId&&s.nodes[s.rootId]);
+function stripImages(s){ const c=JSON.parse(JSON.stringify(s)); let had=false; Object.values(c.places||{}).forEach(p=>(p.attractions||[]).forEach(a=>{ if(a.img){ a.img=null; had=true; } })); if(had) c._imagesElsewhere=true; return c; }
+function restoreImages(s,...sources){ const m={}; sources.forEach(src=>src&&Object.values(src.places||{}).forEach(p=>(p.attractions||[]).forEach(a=>{ if(a.img&&!m[a.id]) m[a.id]=a.img; })));
+  Object.values(s.places||{}).forEach(p=>(p.attractions||[]).forEach(a=>{ if(!a.img&&m[a.id]) a.img=m[a.id]; })); delete s._imagesElsewhere; return s; }
+function writeLS(json){
+  try{ localStorage.setItem(LS_STATE,json); return 'ok'; }catch(_){}
+  try{ localStorage.removeItem(LS_SNAPS); localStorage.setItem(LS_STATE,json); return 'ok'; }catch(_){}   // make room: snapshots also live in IndexedDB
+  try{ localStorage.setItem(LS_STATE,JSON.stringify(stripImages(state))); return 'noimg'; }catch(_){}   // photos too big: keep everything else
+  return 'fail';
+}
+function scheduleSave(){ if(!booted) return; clearTimeout(saveT); saveT=setTimeout(saveNow,300); }
+function saveNow(){
+  clearTimeout(saveT); if(!booted) return;   // never write before the stored trip has been loaded
+  const sig=sigOf(state); if(sig===lastSig) return;
+  state.savedAt=Date.now(); saveInfo.at=state.savedAt;
+  saveInfo.ls=writeLS(JSON.stringify(state)); lastSig=saveInfo.ls==='fail'?'':sig;
+  DB.set('state',state).then(()=>{ saveInfo.idb='ok'; },()=>{ saveInfo.idb='fail'; }).finally(updateSaveStatus);
+  if(state.savedAt-(snaps[0]?.t||0)>SNAP_EVERY) takeSnapshot('自动');
+  updateSaveStatus();
+}
+window.addEventListener('pagehide',saveNow);
+window.addEventListener('beforeunload',saveNow);
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden') saveNow(); });
+function takeSnapshot(label){
+  snaps.unshift({t:Date.now(),label,title:state.title,stops:Object.keys(state.nodes).length,state:JSON.parse(JSON.stringify(state))});
+  snaps=snaps.slice(0,SNAP_MAX); DB.set('snapshots',snaps).catch(()=>{});
+  let list=snaps.map(s=>({...s,state:stripImages(s.state)}));   // localStorage copy without photos, capped so the trip itself always fits
+  while(list.length){ const j=JSON.stringify(list); if(j.length<1.5e6){ try{ localStorage.setItem(LS_SNAPS,j); return; }catch(_){} } list.pop(); }
+  try{ localStorage.removeItem(LS_SNAPS); }catch(_){}
+}
+function restoreSnapshot(s){
+  takeSnapshot('恢复前'); let st=JSON.parse(JSON.stringify(s.state)); if(st._imagesElsewhere) restoreImages(st,state);
+  state=migrate(st); fixActivePath(); render(); saveNow(); toast('已恢复到 '+fmtStamp(s.t)+' 的版本');
+}
+const fmtStamp=t=>{ const d=new Date(t); return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`; };
+async function requestPersist(){   // ask Chrome to exempt this site from clean-up when the disk runs low
+  try{ if(navigator.storage?.persisted){ saveInfo.persisted=await navigator.storage.persisted(); if(!saveInfo.persisted&&navigator.storage.persist) saveInfo.persisted=await navigator.storage.persist(); } }catch(_){}
+  updateSaveStatus();
+}
+function updateSaveStatus(){ const el=document.getElementById('save-status'); if(!el) return;
+  const ls=saveInfo.ls, idb=saveInfo.idb; let txt, warn=false;
+  if(!saveInfo.at) txt=saveInfo.lsAvail||idb==='ok'?'✓ 自动保存已开启':(warn=true,'⚠ 此浏览器无法保存');
+  else if(ls==='ok'||(ls==='noimg'&&idb==='ok')) txt='✓ 已保存 '+fmtStamp(saveInfo.at).split(' ')[1];
+  else if(ls==='noimg') { txt='⚠ 照片未能保存'; warn=true; }
+  else if(idb==='ok') txt='✓ 已保存 '+fmtStamp(saveInfo.at).split(' ')[1];
+  else { txt='⚠ 未能保存，请「导出」备份'; warn=true; }
+  el.textContent=txt; el.classList.toggle('warn',warn); el.title='点这里查看保存状态和历史版本';
+}
+function migrate(s){   // fill in fields added after a file was saved
+  delete s._imagesElsewhere; s.costPerKm??=0.7; if(!['tree','plan','detail','summary'].includes(s.view)) s.view='tree';
+  Object.values(s.places).forEach(p=>{ p.hotel??=0; p.food??=0; p.note??=''; p.attractions??=[]; p.attractions.forEach(a=>{ a.ticket??=0; a.img??=null; }); });
+  Object.values(s.nodes).forEach(n=>{ n.children??=[];
+    if(!n.parents){ n.parents={}; if(n.parentId) n.parents[n.parentId]={mode:n.mode||'drive',minutes:n.minutes}; delete n.mode; delete n.minutes; }   // pre-merge format: one parent, edge stored on the node
+    Object.values(n.parents).forEach(e=>{ e.mode??='drive'; if(e.minutes===''||e.minutes===undefined) e.minutes=null; });
+    if(n.parentId&&!n.parents[n.parentId]) n.parentId=Object.keys(n.parents)[0]||null; });
+  Object.values(s.nodes).forEach(n=>{ n.children=n.children.filter(c=>s.nodes[c]&&s.nodes[c].parents[n.id]); Object.keys(n.parents).forEach(pid=>{ if(!s.nodes[pid]) delete n.parents[pid]; else if(!s.nodes[pid].children.includes(n.id)) s.nodes[pid].children.push(n.id); }); });
+  if(!Array.isArray(s.activePath)){ const p=[]; let x=s.activeLeafId; while(x&&s.nodes[x]&&p.length<1000){ p.unshift(x); if(x===s.rootId) break; x=s.nodes[x].parentId; } s.activePath=p.length&&p[0]===s.rootId?p:[s.rootId]; }
+  delete s.activeLeafId;
+  return s;
+}
+function exportJSON(){ const blob=new Blob([JSON.stringify(state,null,1)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`${(state.title||'waypoint').replace(/[\\\/:*?"<>|]/g,' ')}.json`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),3000); toast('已导出 JSON'); }
+function importJSON(file){ if(!file) return; const fr=new FileReader(); fr.onload=()=>{ try{ const d=JSON.parse(fr.result); if(!validState(d)) throw 0; const next=migrate(d); takeSnapshot('导入前'); state=next; fixActivePath(); toast('已导入 · 原来的行程已存为历史版本'); render(); saveNow(); }catch(_){ toast('不是有效的 Waypoint JSON 文件'); } }; fr.readAsText(file); }
+
+function gmapsLink(pathIds){
+  const pts=pathIds.map(id=>place(node(id).placeId)); if(pts.length<2) return `https://www.google.com/maps/search/?api=1&query=${pts[0].lat},${pts[0].lng}`;
+  const o=pts[0], d=pts[pts.length-1], w=pts.slice(1,-1).map(p=>`${p.lat},${p.lng}`).join('|');
+  const modes=pathLegs(pathIds).slice(1).map(l=>l?l.mode:'drive'); const tm = modes.every(m=>m==='walk')?'walking': modes.every(m=>['train','bus','boat'].includes(m))?'transit':'driving';
+  return `https://www.google.com/maps/dir/?api=1&origin=${o.lat},${o.lng}&destination=${d.lat},${d.lng}${w?`&waypoints=${encodeURIComponent(w)}`:''}&travelmode=${tm}`;
+}
+const amapLink = p => { const [lat,lng]=GCJ.fromWgs(p.lat,p.lng); return `https://uri.amap.com/marker?position=${lng.toFixed(6)},${lat.toFixed(6)}&name=${encodeURIComponent(p.name)}`; };   // 高德 expects GCJ-02
+const placeLink = p => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.name)}`;
+function decisionChip(d){ return d==='go'?'<span class="chip go">去</span>':d==='skip'?'<span class="chip skip">不去</span>':'<span class="chip tbd">待定</span>'; }
+function modeOptions(sel){ return Object.entries(MODES).map(([k,m])=>`<option value="${k}" ${k===sel?'selected':''}>${m.icon} ${m.label}</option>`).join(''); }
+let toastT; function toast(msg){ let t=document.querySelector('.toast'); if(!t){t=document.createElement('div');t.className='toast';document.body.appendChild(t);} t.textContent=msg; clearTimeout(toastT); toastT=setTimeout(()=>t.remove(),1800); }
+
+/* ============ mutations on the route graph ============ */
+function addNode(parentId,placeId,mode='drive'){ const n={id:uid('n'),placeId,parentId,parents:{[parentId]:{mode,minutes:null}},children:[]}; state.nodes[n.id]=n; node(parentId).children.push(n.id); state.activePath=pathTo(parentId).concat(n.id); return n; }
+function insertBetween(pid,cid,placeId,mode='drive'){   // a new stop on the leg pid→cid; the leg into cid keeps its travel mode, both times are re-routed
+  const p=node(pid), c=node(cid), e=c?.parents[pid]; if(!p||!e) return null;
+  const n={id:uid('n'),placeId,parentId:pid,parents:{[pid]:{mode,minutes:null}},children:[cid]}; state.nodes[n.id]=n;
+  p.children=p.children.map(x=>x===cid?n.id:x);
+  c.parents=Object.fromEntries(Object.entries(c.parents).map(([k,v])=>k===pid?[n.id,{mode:e.mode,minutes:null}]:[k,v]));   // same slot, so merged stops keep their order
+  if(c.parentId===pid) c.parentId=n.id;
+  const ap=state.activePath, i=ap.indexOf(pid);
+  if(i>=0&&ap[i+1]===cid) ap.splice(i+1,0,n.id);
+  else { const old=new Set(ap), path=pathTo(n.id); let x=cid; while(x){ path.push(x); const kids=node(x).children; x=kids.find(k=>old.has(k))||kids[0]; } state.activePath=path; }   // follow the new stop through to the end of a route
+  return n;
+}
+function linkNode(parentId,childId,mode='drive'){   // merge: an existing stop becomes the next stop after parentId, so everything after it is shared
+  if(parentId===childId||childId===state.rootId||!node(parentId)||!node(childId)||node(childId).parents[parentId]||ancestors(parentId).has(childId)) return false;
+  node(childId).parents[parentId]={mode,minutes:null}; node(parentId).children.push(childId); state.activePath=pathTo(parentId).concat(childId); return true;
+}
+function detachChild(id,cid){   // remove the connection id->cid; the child is deleted only if that was its last parent
+  const c=node(cid); if(!c) return; delete c.parents[id]; const rest=Object.keys(c.parents);
+  if(!rest.length){ c.parentId=null; deleteNode(cid); } else if(c.parentId===id) c.parentId=rest[0];
+}
+function deleteNode(id){   // remove a stop and its connections; stops after it survive when another branch still reaches them
+  if(id===state.rootId) return; const n=node(id); if(!n) return;
+  Object.keys(n.parents).forEach(pid=>{ const p=node(pid); if(p) p.children=p.children.filter(c=>c!==id); });
+  n.children.slice().forEach(cid=>detachChild(id,cid));
+  delete state.nodes[id]; fixActivePath();
+}
+function unlink(pid,cid){   // cut one incoming connection of a merged stop
+  const c=node(cid); if(!c||!c.parents[pid]) return; if(Object.keys(c.parents).length<=1) return deleteNode(cid);
+  node(pid).children=node(pid).children.filter(x=>x!==cid); detachChild(pid,cid); fixActivePath();
+}
+function spliceNode(id){   // remove one stop but keep what follows: every parent gets connected to every child
+  if(id===state.rootId) return; const n=node(id); if(!n) return; const parents=Object.keys(n.parents), kids=n.children.slice();
+  parents.forEach(pid=>{ const p=node(pid); if(!p) return; p.children=p.children.filter(c=>c!==id);
+    kids.forEach(cid=>{ const c=node(cid); if(c&&!c.parents[pid]&&!ancestors(pid).has(cid)){ c.parents[pid]={mode:c.parents[id]?.mode||'drive',minutes:null}; p.children.push(cid); } }); });
+  kids.forEach(cid=>detachChild(id,cid));
+  delete state.nodes[id]; fixActivePath();
+}
+function createPlace(name,lat,lng,days){ const p={id:uid('p'),name,lat:Number(lat),lng:Number(lng),days:Number(days)||1,note:'',hotel:0,food:0,attractions:[]}; state.places[p.id]=p; return p; }
+
+/* ============ render ============ */
+function render(quiet){   // quiet: re-render in place (routed times arrived) without jumping to the top
+  fixActivePath();
+  document.getElementById('trip-title').value=state.title;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.view===state.view));
+  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+state.view));
+  const ap=activePath(), m=metrics(ap);
+  document.getElementById('active-plan').innerHTML=`当前方案 <b>${ap.map(id=>esc(place(node(id).placeId).name.split(' ')[0])).join(' → ')}</b> · ${m.days} 晚 · 在途 ${fmtMin(m.travel)}`;
+  ({tree:renderTree,plan:renderPlan,detail:renderDetail,summary:renderSummary})[state.view]();
+  if(!quiet) window.scrollTo({top:0});
+  requestRoutes();
+  scheduleSave();
+}
+
+/* ---- 1. tree ---- */
+function renderTree(){
+  const lay=layers(), maxIn=Math.max(1,...Object.values(state.nodes).map(n=>Object.keys(n.parents||{}).length));
+  const COLW=290, W=210, H=maxIn>1?76+50*maxIn:112, ROWH=H+38;   // row spacing fits the tallest box; each box is sized by its own number of incoming connections
+  const hOf=id=>{ const k=Object.keys(node(id).parents||{}).length; return k>1?76+50*k:112; };
+  const pos={}; let row=0, maxD=0;
+  (function dfs(id){ const n=node(id), kids=n.children.filter(c=>node(c).parentId===id); maxD=Math.max(maxD,lay[id]);   // rows follow the layout parent; merge connections are drawn on top
+    if(!kids.length){ pos[id]={x:lay[id],y:row++}; return pos[id].y; }
+    const ys=kids.map(dfs); pos[id]={x:lay[id],y:(Math.min(...ys)+Math.max(...ys))/2}; return pos[id].y; })(state.rootId);
+  const apList=activePath(), ap=new Set(apList), apIdx={}; apList.forEach((id,i)=>apIdx[id]=i);
+  const onLeg=l=>apIdx[l.pid]!=null&&apIdx[l.cid]===apIdx[l.pid]+1;
+  const cw=maxD*COLW+W+16, ch=(Math.max(row,1)-1)*ROWH+H+16;
+  let svg='', boxes='', pills='';
+  allLegs().forEach(l=>{ const pp=pos[l.pid], cp=pos[l.cid]; if(!pp||!cp) return;
+    const x1=pp.x*COLW+W, y1=pp.y*ROWH+hOf(l.pid)/2, x2=cp.x*COLW, y2=cp.y*ROWH+hOf(l.cid)/2, mx=(x1+x2)/2;
+    svg+=`<path class="edge ${onLeg(l)?'on':''}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"/>`;
+    const lbl=`${MODES[l.mode].icon} ${fmtMin(edgeMinutes(l))}${edgeSource(l)==='est'?'*':''}`, [a,b]=legPlaces(l);   // the time pill doubles as the "insert a stop here" button
+    pills+=`<button type="button" class="edge-pill ${onLeg(l)?'on':''}" style="left:${mx}px;top:${(y1+y2)/2}px" data-insert="${legRef(l)}" title="在「${esc(a.name.split(' ')[0])}」和「${esc(b.name.split(' ')[0])}」之间插入站点">${esc(lbl)}<i>＋</i></button>`; });
+  Object.keys(pos).forEach(id=>{
+    const n=node(id), p=place(n.placeId), x=pos[id].x*COLW, y=pos[id].y*ROWH, on=ap.has(id), ins=Object.keys(n.parents||{}), multi=ins.length>1;
+    const step=id===state.rootId?'起点':apIdx[id]!=null?'第'+apIdx[id]+'站':'第'+lay[id]+'站';
+    const edges=ins.map(pid=>{ const l=legOf(pid,id); return `${multi?`<div class="tn-from">← ${esc(place(node(pid).placeId).name.split(' ')[0])}</div>`:''}<div class="tn-edge" data-stop><select data-mode="${legRef(l)}" aria-label="交通方式">${modeOptions(l.mode)}</select><input type="number" min="0" data-min="${legRef(l)}" value="${l.minutes??''}" placeholder="${autoMinutes(l)} 自动" aria-label="分钟">${multi?`<button class="btn small ghost danger" data-unlink="${legRef(l)}" title="断开这条连接">×</button>`:''}</div>`; }).join('');
+    boxes+=`<div class="tnode ${on?'on':''} ${id===state.rootId?'root':''}" style="left:${x}px;top:${y}px;height:${hOf(id)}px" data-node="${id}">
+      <div class="tn-head"><span class="step">${step}</span><span class="name">${esc(p.name)}</span><span class="check">✓</span></div>
+      ${ins.length?edges:`<div class="tn-edge muted" style="font-size:12px;padding-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block">始发地${p.note?' · '+esc(p.note):''}</div>`}
+      <div class="tn-foot"><span class="days">${p.days} 天 · ${p.attractions.filter(a=>a.decision==='go').length}/${p.attractions.length} 景点</span>
+        <span class="row" style="gap:2px" data-stop><button class="btn small ghost" data-add="${id}" title="添加下一站分支，或汇入已有站点">＋ 分支</button>${id===state.rootId?'':`<button class="btn small ghost danger" data-del="${id}" title="删除此站点">×</button>`}</span></div>
+    </div>`;
+  });
+  const plans=allPaths(), apKey=apList.join('>');
+  const v=document.getElementById('v-tree');
+  v.innerHTML=`
+  <div class="section-head"><h2>路线树 · 分岔与选择</h2><p>每个方框是一个可能的站点，从起点向右分岔。点击任一方框，起点到它的这条路径就成为「当前方案」，其余页面都会随之更新。「＋ 分支」也可以把一条分支汇入已有站点，之后的行程就共用一份。点两站之间连线上的时间（带 ＋ 的小胶囊），可以在这两站中间插入一站。驾车时间默认按真实公路路线计算（${esc(provider().name)}）；带 * 的是路线暂时拿不到时的直线估算。都可以手动改。</p></div>
+  <div class="tree-layout">
+    <div class="tree-scroll"><div class="tree-canvas" style="width:${cw}px;height:${ch}px"><svg width="${cw}" height="${ch}">${svg}</svg>${boxes}${pills}</div></div>
+    <div>
+      <div class="section-head" style="margin-bottom:8px"><h2 style="font-size:14px">完整路线对比</h2><span class="hint">${plans.length} 条</span></div>
+      <div class="compare">${plans.map(p=>{ const m=metrics(p), c=costOf(p), on=p.join('>')===apKey;
+        return `<div class="card plan ${on?'on':''}" data-adopt="${p.join('>')}">
+          <div class="route">${p.map((id,i)=>`${i?'<span class="arrow">→</span>':''}<span>${esc(place(node(id).placeId).name.split(' ')[0])}</span>`).join('')}</div>
+          <div class="metrics"><div class="metric"><b>${m.days}</b><span>晚</span></div><div class="metric"><b>${fmtMin(m.travel)}</b><span>在途 · ${Math.round(m.km)} km</span></div><div class="metric"><b>${m.go}<span style="font-size:11px;color:var(--muted)">+${m.tbd}?</span></b><span>已选景点 · 待定</span></div><div class="metric"><b>${yuan(c.total)}</b><span>预算</span></div></div>
+          <div class="adopt"><span class="check" style="width:16px;height:16px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-size:10px;${on?'background:var(--accent);border-color:var(--accent);color:var(--accent-ink)':'color:transparent'}">✓</span>${on?'当前采用的方案':'点击采用这条路线'}</div>
+        </div>`;}).join('')}</div>
+      <p class="hint" style="margin-top:12px">提示：驾车时间来自 ${esc(provider().name)} 的公路路线（不含堵车），火车、大巴、飞机、船按平均速度估算，飞机含 2.5 小时机场时间。预算 = 驾车里程 × 每公里成本${useAmap()?' + 高德过路费':''} + 住宿 × 晚数 + 餐饮 × 天数 + 已选景点门票；每公里成本在「设置」里改。</p>
+    </div>
+  </div>`;
+}
+
+/* ---- 2. planner ---- */
+function schematicSvg(){   // offline fallback used only when Leaflet could not load
+  const ap=activePath();
+  const all=Object.values(state.places).filter(p=>Object.values(state.nodes).some(n=>n.placeId===p.id));
+  // projection
+  const lats=all.map(p=>p.lat), lngs=all.map(p=>p.lng);
+  const midLat=(Math.max(...lats)+Math.min(...lats))/2, k=Math.cos(midLat*Math.PI/180);
+  const VW=800,VH=550,PAD=70;
+  const minX=Math.min(...lngs)*k, maxX=Math.max(...lngs)*k, minY=Math.min(...lats), maxY=Math.max(...lats);
+  const spanX=Math.max(maxX-minX,0.2), spanY=Math.max(maxY-minY,0.2);
+  const sc=Math.min((VW-2*PAD)/spanX,(VH-2*PAD)/spanY);
+  const ox=(VW-spanX*sc)/2, oy=(VH-spanY*sc)/2;
+  const X=p=>ox+(p.lng*k-minX)*sc, Y=p=>VH-(oy+(p.lat-minY)*sc);
+  let grid=''; for(let i=1;i<10;i++){ grid+=`<line class="grid" x1="${VW*i/10}" y1="0" x2="${VW*i/10}" y2="${VH}"/>`; } for(let i=1;i<7;i++){ grid+=`<line class="grid" x1="0" y1="${VH*i/7}" x2="${VW}" y2="${VH*i/7}"/>`; }
+  const apIdx={}; ap.forEach((id,i)=>apIdx[id]=i); let alt='',route='',legs='',pts='';
+  allLegs().forEach(l=>{ const [a,b]=legPlaces(l);
+    const on=apIdx[l.pid]!=null&&apIdx[l.cid]===apIdx[l.pid]+1;
+    if(on){ route+=`<line class="route" x1="${X(a)}" y1="${Y(a)}" x2="${X(b)}" y2="${Y(b)}"/>`;
+      const mx=(X(a)+X(b))/2,my=(Y(a)+Y(b))/2, t=`${MODES[l.mode].icon} ${fmtMin(edgeMinutes(l))}`; legs+=`<rect class="leglbl-bg" x="${mx-t.length*3.6-6}" y="${my-9}" width="${t.length*7.2+12}" height="18" rx="9"/><text class="leglbl" x="${mx}" y="${my+4}">${esc(t)}</text>`; }
+    else alt+=`<line class="alt" x1="${X(a)}" y1="${Y(a)}" x2="${X(b)}" y2="${Y(b)}"/>`; });
+  const onPlaces=new Set(ap.map(id=>node(id).placeId));
+  all.forEach(p=>{ if(!onPlaces.has(p.id)) pts+=`<circle class="pt ghost" cx="${X(p)}" cy="${Y(p)}" r="4"/><text class="lbl ghost" x="${X(p)+8}" y="${Y(p)-6}">${esc(p.name.split(' ')[0])}</text>`; });
+  ap.forEach((id,i)=>{ const p=place(node(id).placeId); pts+=`<circle class="pt ${i?'':'origin'}" cx="${X(p)}" cy="${Y(p)}" r="9"/><text class="n" x="${X(p)}" y="${Y(p)+3.5}">${i||'S'}</text><text class="lbl" x="${X(p)+13}" y="${Y(p)-8}">${esc(p.name.split(' ')[0])}</text>`; });
+  return `<svg class="map" viewBox="0 0 ${VW} ${VH}" role="img" aria-label="路线示意地图">${grid}${alt}${route}${pts}${legs}</svg>`;
+}
+
+/* Leaflet map. The container is created once and re-attached on every render so zoom and tiles survive re-renders. */
+let leaf=null, leafLayer=null, leafTiles=null, leafTileKey='', leafFitKey='';
+const cssVar = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function mountMap(){
+  const host=document.getElementById('map-host'); if(!host) return;
+  if(!window.L){ host.innerHTML=schematicSvg(); return; }
+  if(!leaf){ const el=document.createElement('div'); el.className='leaflet-map'; host.appendChild(el); leaf=L.map(el); leafLayer=L.layerGroup().addTo(leaf); }
+  else { host.appendChild(leaf.getContainer()); leaf.invalidateSize(); }
+  const t=provider().tiles;
+  if(leafTileKey!==t.url){ if(leafTiles) leafTiles.remove(); leafTiles=L.tileLayer(t.url,{subdomains:t.sub,attribution:t.attr,maxZoom:18,crossOrigin:'anonymous'}).addTo(leaf); leafTileKey=t.url; }
+  leafLayer.clearLayers();
+  const ap=activePath(), gcj=provider().gcj, accent=cssVar('--accent'), ghost=cssVar('--ghost'), apIdx={}; ap.forEach((id,i)=>apIdx[id]=i);
+  const LL=p=>gcj?GCJ.fromWgs(p.lat,p.lng):[p.lat,p.lng];   // tiles and routed geometry are both in the provider's datum
+  const used=Object.values(state.places).filter(p=>Object.values(state.nodes).some(n=>n.placeId===p.id));
+  const onPlaces=new Set(ap.map(id=>node(id).placeId));
+  allLegs().forEach(l=>{ const [a,b]=legPlaces(l), on=apIdx[l.pid]!=null&&apIdx[l.cid]===apIdx[l.pid]+1, r=routed(l);
+    const pts=r&&r.geo&&r.geo.length>1?r.geo:[LL(a),LL(b)];
+    L.polyline(pts,{color:on?accent:ghost,weight:on?4:2,dashArray:on?null:'5 5',opacity:on?.95:.8,interactive:false}).addTo(leafLayer);
+    if(on){ const mid=pts[Math.floor(pts.length/2)]; L.marker(mid,{icon:L.divIcon({className:'leg-tip-wrap',html:`<span class="leg-tip">${MODES[l.mode].icon} ${fmtMin(edgeMinutes(l))}</span>`,iconSize:[0,0]}),interactive:false,keyboard:false}).addTo(leafLayer); } });
+  used.forEach(p=>{ if(onPlaces.has(p.id)) return;
+    L.marker(LL(p),{icon:L.divIcon({className:'',html:'<div class="pin ghost"></div>',iconSize:[14,14],iconAnchor:[7,7]}),keyboard:false}).bindTooltip(esc(p.name.split(' ')[0]),{direction:'right',offset:[8,0],className:'pin-lbl ghost'}).addTo(leafLayer); });
+  ap.forEach((id,i)=>{ const p=place(node(id).placeId);
+    L.marker(LL(p),{icon:L.divIcon({className:'',html:`<div class="pin ${i?'':'origin'}">${i||'S'}</div>`,iconSize:[24,24],iconAnchor:[12,12]}),keyboard:false})
+      .bindTooltip(esc(p.name.split(' ')[0]),{permanent:true,direction:'right',offset:[12,0],className:'pin-lbl'})
+      .on('click',()=>{ state.currentPlaceId=p.id; state.view='detail'; render(); }).addTo(leafLayer); });
+  const fitKey=used.map(p=>p.id).sort().join(',')+'|'+leafTileKey;
+  if(fitKey!==leafFitKey){ leafFitKey=fitKey; const b=L.latLngBounds(used.map(LL)); if(b.isValid()) leaf.fitBounds(b.pad(0.12)); }
+}
+
+/* ---- static map for the summary sheet: tiles stitched on a canvas at print resolution, route and stops drawn on top ---- */
+const staticMap={key:'',url:'',busy:false,printWhenReady:false};
+function staticMapKey(){ const ap=activePath(); return provider().tiles.url+'|'+ap.map((id,i)=>{ const r=i?routed(legOf(ap[i-1],id)):null; return id+':'+(r&&r.geo?r.geo.length:0); }).join(','); }
+function tileXY(lat,lng,z){ const n=2**z, r=lat*Math.PI/180; return [(lng+180)/360*n, (1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n]; }
+function loadTile(url){ return new Promise(res=>{ const img=new Image(); img.crossOrigin='anonymous'; const done=v=>{ clearTimeout(tm); res(v); }; const tm=setTimeout(()=>done(null),12000); img.onload=()=>done(img); img.onerror=()=>done(null); img.src=url; }); }
+async function buildStaticMap(){
+  const key=staticMapKey(); if(staticMap.busy||staticMap.key===key) return; staticMap.busy=true;
+  try{
+    const W=1600,H=1000,PAD=120, ap=activePath(), t=provider().tiles, gcj=provider().gcj;
+    const LL=p=>gcj?GCJ.fromWgs(p.lat,p.lng):[p.lat,p.lng];
+    const legs=pathLegs(ap).filter(Boolean).map(leg=>{ const r=routed(leg), [a,b]=legPlaces(leg); return {leg, pts:(r&&r.geo&&r.geo.length>1)?r.geo:[LL(a),LL(b)]}; });
+    const stops=ap.map((id,i)=>({i,p:place(node(id).placeId),ll:LL(place(node(id).placeId))}));
+    const all=stops.map(s=>s.ll).concat(...legs.map(l=>l.pts));
+    // fractional zoom so the route fills the canvas; tiles come from the nearest integer zoom and are scaled to fit
+    const box={minX:1e9,maxX:-1e9,minY:1e9,maxY:-1e9}; for(const p of all){ const [x,y]=tileXY(p[0],p[1],0); if(x<box.minX)box.minX=x; if(x>box.maxX)box.maxX=x; if(y<box.minY)box.minY=y; if(y>box.maxY)box.maxY=y; }
+    const z=Math.min(17,Math.log2(Math.min((W-2*PAD)/Math.max(box.maxX-box.minX,1e-7)/256,(H-2*PAD)/Math.max(box.maxY-box.minY,1e-7)/256)));
+    const zt=Math.max(2,Math.min(18,Math.round(z))), S=256*2**(z-zt), N=2**zt;   // S: size of one zoom-zt tile on the canvas
+    const ox=(box.minX+box.maxX)/2*256*2**z-W/2, oy=(box.minY+box.maxY)/2*256*2**z-H/2;
+    const X=ll=>tileXY(ll[0],ll[1],0)[0]*256*2**z-ox, Y=ll=>tileXY(ll[0],ll[1],0)[1]*256*2**z-oy;
+    const c=document.createElement('canvas'); c.width=W; c.height=H; const g=c.getContext('2d'); g.imageSmoothingQuality='high';
+    g.fillStyle='#E9EEF2'; g.fillRect(0,0,W,H);
+    const jobs=[]; for(let tx=Math.floor(ox/S);tx<=Math.floor((ox+W)/S);tx++) for(let ty=Math.max(0,Math.floor(oy/S));ty<=Math.min(N-1,Math.floor((oy+H)/S));ty++){
+      const url=t.url.replace('{z}',zt).replace('{x}',((tx%N)+N)%N).replace('{y}',ty).replace('{s}',t.sub[Math.abs(tx+ty)%t.sub.length]);
+      jobs.push(loadTile(url).then(img=>{ if(img) g.drawImage(img,tx*S-ox,ty*S-oy,S+0.5,S+0.5); })); }
+    await Promise.all(jobs);
+    // route: white halo then accent line
+    g.lineCap='round'; g.lineJoin='round';
+    for(const pass of [['rgba(255,255,255,.85)',13],['#0F6E8C',7]]){ g.strokeStyle=pass[0]; g.lineWidth=pass[1];
+      legs.forEach(l=>{ g.beginPath(); l.pts.forEach((p,i)=>g[i?'lineTo':'moveTo'](X(p),Y(p))); g.stroke(); }); }
+    // leg time pills
+    g.font='500 22px "IBM Plex Mono",Menlo,monospace'; g.textBaseline='middle';
+    legs.forEach(l=>{ const mid=l.pts[Math.floor(l.pts.length/2)], txt=`${MODES[l.leg.mode].icon} ${fmtMin(edgeMinutes(l.leg))}`, w=g.measureText(txt).width+26, x=X(mid), y=Y(mid);
+      g.fillStyle='#fff'; g.strokeStyle='#D5DDE4'; g.lineWidth=2; g.beginPath(); g.roundRect(x-w/2,y-19,w,38,19); g.fill(); g.stroke(); g.fillStyle='#182230'; g.textAlign='center'; g.fillText(txt,x,y+1); });
+    // stops: numbered pins with name labels; stops at the same coordinates (origin and return) share one pin
+    const groups=new Map(); stops.forEach(s=>{ const k=s.ll[0].toFixed(5)+','+s.ll[1].toFixed(5); if(!groups.has(k)) groups.set(k,{ll:s.ll,idx:[],name:s.p.name.split(' ')[0],origin:false}); const gp=groups.get(k); gp.idx.push(s.i||'S'); if(!s.i) gp.origin=true; });
+    groups.forEach(gp=>{ const x=X(gp.ll), y=Y(gp.ll), txt=gp.idx.join('/');
+      g.beginPath(); g.arc(x,y,24,0,Math.PI*2); g.fillStyle=gp.origin?'#D9961E':'#0F6E8C'; g.fill(); g.lineWidth=5; g.strokeStyle='#fff'; g.stroke();
+      g.fillStyle='#fff'; g.font=`500 ${txt.length>2?17:23}px "IBM Plex Mono",Menlo,monospace`; g.textAlign='center'; g.fillText(txt,x,y+1);
+      const right=x<W*0.72, lx=right?x+32:x-32;   // labels flip to the left near the right edge so they are not clipped
+      g.font='700 28px "Manrope","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif'; g.textAlign=right?'left':'right'; g.lineWidth=8; g.strokeStyle='rgba(255,255,255,.95)'; g.strokeText(gp.name,lx,y); g.fillStyle='#182230'; g.fillText(gp.name,lx,y); });
+    // attribution
+    g.font='500 20px "Manrope",sans-serif'; g.textAlign='right'; const at=t.attr, aw=g.measureText(at).width+20; g.fillStyle='rgba(255,255,255,.85)'; g.fillRect(W-aw,H-34,aw,34); g.fillStyle='#5F6E7C'; g.fillText(at,W-10,H-17);
+    staticMap.url=c.toDataURL('image/jpeg',.9);
+  }catch(e){ staticMap.url=''; }
+  staticMap.key=key; staticMap.busy=false;
+  if(state.view==='summary'){ render(true); if(staticMap.printWhenReady){ staticMap.printWhenReady=false; setTimeout(()=>{ try{ window.print(); }catch(_){ } },400); } }
+}
+
+function renderPlan(){
+  const ap=activePath(), m=metrics(ap), c=costOf(ap);
+  const v=document.getElementById('v-plan');
+  v.innerHTML=`
+  <div class="planner">
+    <div class="card panel col-left">
+      <h3>站点与交通 <button class="btn small primary" data-add="${ap[ap.length-1]}">＋ 添加站点</button></h3>
+      <div class="stop-list">
+      ${ap.map((id,i)=>{ const n=node(id), p=place(n.placeId), l=i?legOf(ap[i-1],id):null; return `
+        ${l?`<div class="leg"><div class="rail"><i></i></div><div class="box">
+          <div class="row"><select data-mode="${legRef(l)}" aria-label="交通方式">${modeOptions(l.mode)}</select><input type="number" min="0" data-min="${legRef(l)}" value="${l.minutes??''}" placeholder="${autoMinutes(l)}" aria-label="分钟"><span class="hint">分钟</span></div>
+          <div class="est">${legSourceText(l)}</div>
+          <button type="button" class="btn small ghost ins-btn" data-insert="${legRef(l)}">＋ 在这两站之间插入站点</button></div></div>`:''}
+        <div class="stop ${i?'':'origin'}"><div class="dot">${i||'S'}</div><div class="body">
+          <div class="title"><b>${esc(p.name)}</b><span class="row" style="gap:2px"><button class="btn small ghost" data-goto="${p.id}">景点 ›</button>${i?`<button class="btn small ghost danger" data-splice="${id}" title="从当前方案移除">×</button>`:''}</span></div>
+          <div class="ctrls"><label class="field"><span class="hint">停留天数</span><input type="number" min="0" step="0.5" data-days="${p.id}" value="${p.days}"></label><label class="field"><span class="hint">地图</span><span class="row" style="gap:4px"><a class="btn small" href="${amapLink(p)}" target="_blank" rel="noopener">高德</a><a class="btn small" href="${placeLink(p)}" target="_blank" rel="noopener">Google</a></span></label></div>
+          <div class="sub">${esc(p.note||'')}</div>
+        </div></div>`; }).join('')}
+      </div>
+    </div>
+    <div class="card mapwrap col-map">
+      <div id="map-host"></div>
+      <div class="map-foot">
+        <div class="stats"><div><b>${m.stops}</b><span>中途站点</span></div><div><b>${m.days}</b><span>晚</span></div><div><b>${fmtMin(m.travel)}</b><span>在途时间</span></div><div><b>${Math.round(m.km)}</b><span>里程 km</span></div><div><b>${yuan(c.total)}</b><span>预算</span></div></div>
+        <a class="btn primary" href="${gmapsLink(ap)}" target="_blank" rel="noopener">在 Google 地图打开整条路线 ↗</a>
+      </div>
+      <p class="hint" style="margin:8px 0 0">底图与路线来自 ${esc(provider().name)}；实线是当前方案，虚线是路线树里未采用的分支，点站点可跳到它的景点页。路况和时刻表请点上面按钮到 Google 地图查看。</p>
+    </div>
+    <div class="card panel col-right">
+      <h3>方案总览 <span class="hint">${m.go} 个景点 · 约 ${m.hours} 小时 · ${yuan(c.total)}</span></h3>
+      ${ap.map((id,i)=>{ const p=place(node(id).placeId); const go=p.attractions.filter(a=>a.decision==='go'); const hrs=go.reduce((s,a)=>s+(Number(a.hours)||0),0); const cap=(Number(p.days)||0)*8; const pct=cap?Math.min(100,hrs/cap*100):0; const sc=stopCost(p);
+        return `<div class="sum-stop"><div class="h"><b>${i?i+'. ':''}${esc(p.name.split(' ')[0])}</b><span class="hint num">${p.days} 天 · ${hrs}h / ${cap}h${sc?' · '+yuan(sc):''}</span></div>
+          <div class="bar"><i class="${hrs>cap?'over':''}" style="width:${pct}%"></i></div>
+          <ul>${p.attractions.length?p.attractions.map(a=>`<li class="${a.decision}">${a.decision==='go'?'✓ ':a.decision==='skip'?'– ':'? '}${esc(a.name)}<span class="t">${a.hours}h</span></li>`).join(''):'<li class="muted">还没有景点，去「站点景点」页添加</li>'}</ul></div>`; }).join('')}
+      <p class="hint" style="margin-top:10px">进度条按每天 8 小时游览时间估算，红色表示已选景点超出停留天数。金额 = 住宿 × 晚数 + 餐饮 × 天数 + 已选景点门票。</p>
+    </div>
+  </div>`;
+  mountMap();
+}
+
+/* ---- 3. stop detail ---- */
+function renderDetail(){
+  const ap=activePath(); const apPlaces=ap.map(id=>node(id).placeId);
+  if(!place(state.currentPlaceId)) state.currentPlaceId=apPlaces[0];
+  const p=place(state.currentPlaceId); const inPlan=apPlaces.includes(p.id);
+  const others=Object.values(state.places).filter(x=>!apPlaces.includes(x.id)&&Object.values(state.nodes).some(n=>n.placeId===x.id));
+  const go=p.attractions.filter(a=>a.decision==='go'), hrs=go.reduce((s,a)=>s+(Number(a.hours)||0),0);
+  const v=document.getElementById('v-detail');
+  v.innerHTML=`
+  <div class="stop-nav">${apPlaces.map((pid,i)=>`<button class="btn small ${pid===p.id?'on':''}" data-goto="${pid}">${i||'S'} · ${esc(place(pid).name.split(' ')[0])}</button>`).join('')}${others.length?`<span class="hint" style="align-self:center;margin-left:6px">未采用：</span>${others.map(x=>`<button class="btn small ghost ${x.id===p.id?'on':''}" data-goto="${x.id}">${esc(x.name.split(' ')[0])}</button>`).join('')}`:''}</div>
+  <div class="detail-head">
+    <div><div class="eyebrow">${inPlan?'当前方案第 '+apPlaces.indexOf(p.id)+' 站':'未在当前方案中'}</div><h2>${esc(p.name)}</h2><div class="coords">${p.lat.toFixed(4)}, ${p.lng.toFixed(4)} · <a href="${amapLink(p)}" target="_blank" rel="noopener">高德地图 ↗</a> · <a href="${placeLink(p)}" target="_blank" rel="noopener">Google 地图 ↗</a></div></div>
+    <div class="row"><span class="chip go">${go.length} 去</span><span class="chip tbd">${p.attractions.filter(a=>a.decision==='tbd').length} 待定</span><span class="chip skip">${p.attractions.filter(a=>a.decision==='skip').length} 不去</span></div>
+  </div>
+  <div class="detail-grid">
+    <div>
+      <div class="attr-grid">
+        ${p.attractions.map(a=>`<div class="card attr ${a.decision}" data-attr="${a.id}">
+          <div class="img">${a.img?`<img src="${a.img}" alt="${esc(a.name)}">`:'<span>还没有图片</span>'}<label class="btn small">${a.img?'换图':'上传图片'}<input type="file" accept="image/*" data-img="${a.id}"></label></div>
+          <div class="ab">
+            <input class="name" data-aname="${a.id}" value="${esc(a.name)}" aria-label="景点名称">
+            <textarea data-adesc="${a.id}" placeholder="写点介绍：为什么值得去、怎么去、注意事项…" aria-label="介绍">${esc(a.desc)}</textarea>
+            <div class="meta">预计 <input type="number" min="0" step="0.5" data-ahours="${a.id}" value="${a.hours}"> 小时 · 门票 ¥<input class="ticket" type="number" min="0" data-aticket="${a.id}" value="${a.ticket??0}"> <button class="btn small ghost danger" style="margin-left:auto" data-adel="${a.id}">删除</button></div>
+            <div class="decide"><button class="dbtn go ${a.decision==='go'?'on':''}" data-decide="${a.id}" data-val="go">✓ 去</button><button class="dbtn ${a.decision==='tbd'?'on':''}" data-decide="${a.id}" data-val="tbd">? 待定</button><button class="dbtn skip ${a.decision==='skip'?'on':''}" data-decide="${a.id}" data-val="skip">✕ 不去</button></div>
+          </div></div>`).join('')}
+        <form class="card add-attr" id="add-attr">
+          <b>添加景点</b>
+          <input id="na-name" placeholder="景点名称" required>
+          <textarea id="na-desc" placeholder="一两句介绍（可选）" rows="2"></textarea>
+          <div class="row"><label class="field" style="flex:1"><span class="hint">预计小时</span><input id="na-hours" type="number" min="0" step="0.5" value="2"></label><label class="field" style="flex:1"><span class="hint">门票 ¥</span><input id="na-ticket" type="number" min="0" value="0"></label><label class="field" style="flex:1"><span class="hint">图片</span><input id="na-img" type="file" accept="image/*"></label></div>
+          <button class="btn primary" type="submit">添加</button>
+        </form>
+      </div>
+    </div>
+    <div class="card side-info">
+      <div class="eyebrow">站点信息</div>
+      <label class="field"><span>停留天数</span><input type="number" min="0" step="0.5" data-days="${p.id}" value="${p.days}"></label>
+      <div class="row"><label class="field"><span>住宿 ¥/晚</span><input type="number" min="0" data-hotel="${p.id}" value="${p.hotel??0}"></label><label class="field"><span>餐饮 ¥/天</span><input type="number" min="0" data-food="${p.id}" value="${p.food??0}"></label></div>
+      <label class="field"><span>备注（住宿、交通卡、提醒…）</span><textarea data-note="${p.id}">${esc(p.note||'')}</textarea></label>
+      <div class="kv"><span>已选景点合计</span><b>${hrs} h</b></div>
+      <div class="kv"><span>可用游览时间（8h/天）</span><b>${(Number(p.days)||0)*8} h</b></div>
+      <div class="kv"><span>本站预算（住宿 + 餐饮 + 门票）</span><b>${yuan(stopCost(p))}</b></div>
+      <div class="kv"><span>景点决定会同步到</span><span class="chip accent">总览 · 总结</span></div>
+      <button class="btn" data-view-go="plan">← 回到行程与地图</button>
+    </div>
+  </div>`;
+}
+
+/* ---- 4. summary ---- */
+function renderSummary(){
+  const ap=activePath(), m=metrics(ap), c=costOf(ap);
+  let day=1; const start=state.startDate?new Date(state.startDate+'T00:00:00'):null;
+  const fmtDate=d=>{ if(!start) return ''; const x=new Date(start); x.setDate(x.getDate()+d-1); return `${x.getMonth()+1}/${x.getDate()}`; };
+  const v=document.getElementById('v-summary');
+  v.innerHTML=`
+  <div class="summary-tools">
+    <div class="row"><label class="field"><span>出发日期（可选，用于标注每天）</span><input type="date" id="start-date" value="${esc(state.startDate)}"></label></div>
+    <div class="row"><button class="btn primary" id="btn-pdf">导出 PDF / 打印</button><span class="hint">在浏览器打印对话框里选「另存为 PDF」。</span></div>
+  </div>
+  <article class="sheet">
+    <div class="masthead"><div><div class="eyebrow">Itinerary · 行程总结</div><h1>${esc(state.title)}</h1></div><div class="sub">${ap.length-2} 站 · ${m.days} 晚${start?` · ${fmtDate(1)} 出发`:''}</div></div>
+    <div class="strip">${ap.map((id,i)=>{ const p=place(node(id).placeId), l=i?legOf(ap[i-1],id):null; return `${l?`<span class="l"><span>${MODES[l.mode].icon} ${MODES[l.mode].label}</span><span>${fmtMin(edgeMinutes(l))}</span></span>`:''}<span class="s ${i?'':'origin'}"><i>${i||'S'}</i>${esc(p.name.split(' ')[0])}</span>`; }).join('')}</div>
+    <div class="totals"><div><b>${m.days}</b><span>晚</span></div><div><b>${fmtMin(m.travel)}</b><span>在途时间</span></div><div><b>${Math.round(m.km)} km</b><span>总里程</span></div><div><b>${m.go}</b><span>已选景点 · ${m.hours}h</span></div></div>
+    <div class="budget"><div><b>${yuan(c.total)}</b><span>预算合计</span></div><div><b>${yuan(c.drive+c.tolls)}</b><span>驾车 ${Math.round(m.km)} km${c.tolls?' 含过路费':''}</span></div><div><b>${yuan(c.hotel)}</b><span>住宿 ${m.days} 晚</span></div><div><b>${yuan(c.food)}</b><span>餐饮</span></div><div><b>${yuan(c.tickets)}</b><span>门票 ${m.go} 个景点</span></div></div>
+    <figure class="print-map">${staticMap.key===staticMapKey()?(staticMap.url?`<img src="${staticMap.url}" alt="路线地图">`:schematicSvg()):'<div class="gen">地图生成中…</div>'}</figure>
+    ${ap.map((id,i)=>{ const n=node(id), p=place(n.placeId), l=i?legOf(ap[i-1],id):null; const nights=Number(p.days)||0, d0=day, span=nights>0?Math.ceil(nights):0, last=i===ap.length-1; day+=span;   // a 0-night stop shares its day with the next stop
+      const go=p.attractions.filter(a=>a.decision==='go'), tbd=p.attractions.filter(a=>a.decision==='tbd');
+      const when=(i===0&&!span)?`<b>出发</b>${start?fmtDate(d0):''}`:`<b>Day ${d0}${span>1?'–'+(d0+span-1):''}</b>${start?`${fmtDate(d0)}${span>1?' – '+fmtDate(d0+span-1):''}<br>`:''}${nights>0?p.days+' 天停留':last?'到达，行程结束':'途经，不过夜'}`;
+      return `<section class="day"><div class="when">${when}</div>
+        <div><h3>${i?i+'. ':''}${esc(p.name)}</h3>
+        ${l?`<div class="arrive">${MODES[l.mode].icon} 从 ${esc(place(node(l.pid).placeId).name.split(' ')[0])} ${MODES[l.mode].label}抵达 · 约 ${fmtMin(edgeMinutes(l))}</div>`:'<div class="arrive">出发地</div>'}
+        ${go.length?`<div class="picks">${go.map(a=>`<div class="pick"><div class="th">${a.img?`<img src="${a.img}" alt="">`:''}</div><div><b>${esc(a.name)}</b><span class="t">${a.hours}h</span><p>${esc(a.desc)}</p></div></div>`).join('')}</div>`:'<div class="none">还没有确定要去的景点</div>'}
+        ${tbd.length?`<div class="note">待定：${tbd.map(a=>esc(a.name)).join('、')}</div>`:''}
+        ${stopCost(p)?`<div class="note">预算 ${yuan(stopCost(p))}${p.hotel&&nights?` · 住宿 ¥${p.hotel} × ${nights} 晚`:''}${p.food&&nights?` · 餐饮 ¥${p.food}/天`:''}${go.some(a=>a.ticket)?` · 门票 ¥${go.reduce((s,a)=>s+(Number(a.ticket)||0),0)}`:''}</div>`:''}
+        ${p.note?`<div class="note">${esc(p.note)}</div>`:''}
+        </div></section>`; }).join('')}
+    <div class="foot"><span>Waypoint 路书 · 时间为估算，以实际时刻表为准</span><span>${new Date().toLocaleDateString('zh-CN')}</span></div>
+  </article>`;
+  buildStaticMap();
+}
+
+/* ============ modal ============ */
+function openAddStop(parentId,childId=null){   // childId given: insert a stop on the leg parentId→childId instead of adding a branch after parentId
+  const parent=node(parentId), pp=place(parent.placeId), cp=childId?place(node(childId).placeId):null, leg=childId?legOf(parentId,childId):null;
+  const existing=Object.values(state.places).filter(p=>p.id!==parent.placeId&&p.id!==cp?.id);
+  const anc=ancestors(parentId), lay=layers();   // merge targets: any stop that is not this one, not before it on some path, and not already its next stop
+  const targets=Object.values(state.nodes).filter(n=>n.id!==parentId&&n.id!==state.rootId&&!anc.has(n.id)&&!n.parents[parentId]).sort((a,b)=>lay[a.id]-lay[b.id]);
+  const root=document.getElementById('modal-root');
+  let tab=existing.length?'existing':'new';
+  const draw=()=>{ root.innerHTML=`<div class="modal-bg" data-close><form class="modal" id="add-stop-form">
+    <h3>${cp?`在「${esc(pp.name.split(' ')[0])}」和「${esc(cp.name.split(' ')[0])}」之间插入站点`:`在「${esc(pp.name.split(' ')[0])}」之后添加站点`}</h3>
+    <div class="seg"><button type="button" data-tab="existing" class="${tab==='existing'?'on':''}">已有地点</button><button type="button" data-tab="new" class="${tab==='new'?'on':''}">新地点</button>${cp?'':`<button type="button" data-tab="merge" class="${tab==='merge'?'on':''}">汇入已有站点</button>`}</div>
+    ${tab==='existing'?`<label class="field"><span>选择地点</span><select id="as-place">${existing.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label>`
+    :tab==='merge'?`<label class="field"><span>接到路线树里已有的站点</span><select id="as-target" ${targets.length?'':'disabled'}>${targets.length?targets.map(n=>`<option value="${n.id}">${esc(place(n.placeId).name)}（第${lay[n.id]}站 · 前一站 ${esc(place(node(n.parentId).placeId).name.split(' ')[0])}）</option>`).join(''):'<option>没有可汇入的站点</option>'}</select></label>
+      <span class="hint">两条分支在这里汇合：之后的站点共用一份，不用再复制。汇合后每条走法仍会单独出现在「完整路线对比」里。</span>`
+    :`<div class="row"><input id="as-q" placeholder="搜索地名或景点，例：阳朔、猫儿山" style="flex:1" autocomplete="off"><button type="button" class="btn" id="as-search">搜索</button></div>
+      <div class="results" id="as-results"></div>
+      <label class="field"><span>名称</span><input id="as-name" placeholder="例：阳朔" required></label>
+      <div class="grid2"><label class="field"><span>纬度 lat</span><input id="as-lat" type="number" step="any" placeholder="24.7785" required></label><label class="field"><span>经度 lng</span><input id="as-lng" type="number" step="any" placeholder="110.4966" required></label></div>
+      <label class="field"><span>停留天数</span><input id="as-days" type="number" min="0" step="0.5" value="1"></label>
+      <span class="hint">搜索结果来自 ${esc(provider().name)}，点一条自动填入；也可以在 Google 地图上右键地点复制经纬度手动填。</span>`}
+    <label class="field"><span>${cp?`从「${esc(pp.name.split(' ')[0])}」到新站点的交通方式`:'交通方式'}</span><select id="as-mode">${modeOptions(leg?.mode||'drive')}</select></label>
+    ${cp?`<span class="hint">新站点到「${esc(cp.name.split(' ')[0])}」沿用原来的交通方式。两段时间都会按路线重新计算，原来手填的时间不再沿用。</span>`:''}
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>取消</button><button type="submit" class="btn primary">${cp?'插入':'添加'}</button></div>
+  </form></div>`;
+    root.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;draw();});
+    root.querySelectorAll('[data-close]').forEach(b=>b.onclick=e=>{ if(e.target===b) root.innerHTML=''; });
+    const q=root.querySelector('#as-q');
+    if(q){ const run=async()=>{ const kw=q.value.trim(); if(!kw) return; const box=root.querySelector('#as-results'); box.innerHTML='<span class="hint">搜索中…</span>';
+        try{ const rs=await provider().search(kw);
+          box.innerHTML=rs.length?rs.map((r,i)=>`<button type="button" data-pick="${i}"><b>${esc(r.name)}</b>${esc(r.addr)}</button>`).join(''):'<span class="hint">没有结果，换个关键词试试</span>';
+          box.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>{ const r=rs[+b.dataset.pick]; root.querySelector('#as-name').value=r.name; root.querySelector('#as-lat').value=r.lat.toFixed(5); root.querySelector('#as-lng').value=r.lng.toFixed(5); box.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b)); });
+        }catch(e){ box.innerHTML=`<span class="hint">搜索失败：${esc(e.message||'')}</span>`; } };
+      root.querySelector('#as-search').onclick=run; q.onkeydown=e=>{ if(e.key==='Enter'){ e.preventDefault(); run(); } }; }
+    root.querySelector('#add-stop-form').onsubmit=e=>{ e.preventDefault(); const mode=root.querySelector('#as-mode').value;
+      if(tab==='merge'){ if(!targets.length||!linkNode(parentId,root.querySelector('#as-target').value,mode)){ toast('这个站点不能汇入'); return; } root.innerHTML=''; toast('已汇入，之后的站点共用'); render(); return; }
+      let pid; if(tab==='existing') pid=root.querySelector('#as-place').value; else pid=createPlace(root.querySelector('#as-name').value.trim(),root.querySelector('#as-lat').value,root.querySelector('#as-lng').value,root.querySelector('#as-days').value).id;
+      if(cp){ if(!insertBetween(parentId,childId,pid,mode)){ toast('这两站之间不能插入'); return; } root.innerHTML=''; toast('已插入站点'); render(); return; }
+      addNode(parentId,pid,mode); root.innerHTML=''; toast('已添加站点并切换到该路线'); render(); };
+    const f=root.querySelector('input,select'); f&&f.focus();
+  }; draw();
+}
+
+function openSettings(){
+  const root=document.getElementById('modal-root');
+  root.innerHTML=`<div class="modal-bg" data-close><form class="modal" id="settings-form">
+    <h3>设置</h3>
+    <div class="field"><span>高德 Web服务 Key（可选）</span><div class="row" style="flex-wrap:nowrap"><input id="st-key" style="flex:1" value="${esc(settings.amapKey)}" placeholder="粘贴后底图、路线和搜索改用高德" autocomplete="off" spellcheck="false"><button type="button" class="btn" id="st-test">测试</button></div><span class="hint" id="st-test-out"></span></div>
+    <label class="field"><span>地图数据源</span><select id="st-prov"><option value="auto" ${settings.provider!=='osm'?'selected':''}>自动：有 Key 用高德，否则 OpenStreetMap + OSRM</option><option value="osm" ${settings.provider==='osm'?'selected':''}>始终用 OpenStreetMap + OSRM</option></select></label>
+    <label class="field"><span>驾车每公里成本（油费等，¥/km）</span><input id="st-km" type="number" min="0" step="0.1" value="${state.costPerKm??0.7}"></label>
+    <p class="hint" style="margin:0">当前数据源：${esc(provider().name)}。Key 只存在这台浏览器里，不会随导出的 JSON 分享。</p>
+    <div class="save-box">
+      <b style="font-size:13px">自动保存</b>
+      <div class="kv"><span>localStorage</span><span>${({ok:'✓ 已写入',noimg:'✓ 已写入（照片太大，只存在 IndexedDB）',fail:'✕ 写入失败'})[saveInfo.ls]||(saveInfo.lsAvail?'✓ 可用':'✕ 不可用')}</span></div>
+      <div class="kv"><span>IndexedDB</span><span>${({ok:'✓ 已写入',fail:'✕ 不可用'})[saveInfo.idb]||'…'}</span></div>
+      <div class="kv"><span>持久存储</span><span>${saveInfo.persisted==null?'浏览器不支持':saveInfo.persisted?'✓ 已开启，Chrome 不会自动清除':'未开启：磁盘快满时 Chrome 可能清掉 IndexedDB，localStorage 那份仍在'}</span></div>
+      <div class="kv"><span>上次保存</span><span>${saveInfo.at?fmtStamp(saveInfo.at):'本次打开后还没有修改'}</span></div>
+      ${DEV?`<div class="kv"><span>测试版</span><span>数据和正式版分开保存 <button type="button" class="btn small" id="st-copy-main">从正式版重新复制行程</button></span></div>`:''}
+      <span class="hint">历史版本：每 10 分钟自动留一份，导入、重置、恢复之前也会留一份。最稳妥的备份仍是顶栏「导出」的JSON 文件。</span>
+      <div class="snaps">${snaps.length?snaps.map((s,i)=>`<div class="snap"><span>${fmtStamp(s.t)} · ${esc(s.label)} · ${esc(s.title||'')} · ${s.stops} 站</span><button type="button" class="btn small" data-restore="${i}">恢复</button></div>`).join(''):'<span class="hint">还没有历史版本</span>'}</div>
+    </div>
+    <div class="row" style="justify-content:space-between"><button type="button" class="btn small ghost" id="st-reroute">清除路线缓存并重算</button><button type="button" class="btn small ghost danger" id="st-reset">重置为示例行程</button></div>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" data-close>取消</button><button type="submit" class="btn primary">保存</button></div>
+  </form></div>`;
+  root.querySelectorAll('[data-close]').forEach(b=>b.onclick=e=>{ if(e.target===b) root.innerHTML=''; });
+  root.querySelector('#st-test').onclick=async()=>{ const key=root.querySelector('#st-key').value.trim(), out=root.querySelector('#st-test-out');
+    if(!key){ out.textContent='先粘贴 Key 再测试'; return; } out.textContent='测试中…';
+    const WHY={'10001':'Key 无效，检查是否复制完整','10009':'Key 类型不对：要在控制台新建一个「Web服务」类型的 Key，不是 Web端(JS API)','10003':'今日配额已用完','10005':'IP 不在白名单里，把 Key 的 IP 白名单清空'};
+    try{ const j=await (await fetch(`https://restapi.amap.com/v3/geocode/geo?key=${encodeURIComponent(key)}&address=${encodeURIComponent('长沙市')}`)).json();
+      out.textContent=j.status==='1'?'✓ Key 可用，保存后地图、路线、搜索改用高德':`✕ ${WHY[j.infocode]||j.info||'失败'}（${j.infocode||''}）`; }
+    catch(e){ out.textContent='✕ 请求失败，检查网络：'+(e.message||''); } };
+  root.querySelector('#st-reroute').onclick=()=>{ clearRoutes(); root.innerHTML=''; toast('正在重新计算路线'); render(); };
+  root.querySelector('#st-reset').onclick=()=>{ if(!confirm('确定换成示例行程？当前行程会先存为历史版本，可以在这里恢复。')) return; takeSnapshot('重置前'); state=sampleState(); root.innerHTML=''; render(); saveNow(); };
+  root.querySelector('#st-copy-main')?.addEventListener('click',async()=>{ const main=await readMainTrip(); if(!main){ toast('这个浏览器里没有正式版的行程'); return; }
+    if(!confirm('用正式版现在的行程替换测试版？测试版当前的行程会先存为历史版本。')) return;
+    takeSnapshot('复制正式版前'); state=migrate(main); root.innerHTML=''; fixActivePath(); render(); saveNow(); toast('已复制正式版的行程'); });
+  root.querySelectorAll('[data-restore]').forEach(b=>b.onclick=()=>{ const s=snaps[+b.dataset.restore]; if(!s||!confirm(`用 ${fmtStamp(s.t)} 的版本替换当前行程？当前行程会先存为历史版本。`)) return; root.innerHTML=''; restoreSnapshot(s); });
+  root.querySelector('#settings-form').onsubmit=e=>{ e.preventDefault();
+    settings.amapKey=root.querySelector('#st-key').value.trim(); settings.provider=root.querySelector('#st-prov').value; saveSettings();
+    state.costPerKm=Number(root.querySelector('#st-km').value)||0;
+    root.innerHTML=''; toast(`已保存 · 数据源：${provider().name}`); render(); };
+  root.querySelector('#st-key').focus();
+}
+
+/* ============ events ============ */
+document.getElementById('tabs').addEventListener('click',e=>{ const t=e.target.closest('.tab'); if(t){ state.view=t.dataset.view; render(); } });
+document.addEventListener('keydown',e=>{ if(e.target.matches('input,textarea,select')) return; const v={1:'tree',2:'plan',3:'detail',4:'summary'}[e.key]; if(v){state.view=v;render();} });
+
+document.body.addEventListener('click',e=>{
+  const t=e.target;
+  const b=t.closest('[data-add],[data-del],[data-adopt],[data-goto],[data-splice],[data-decide],[data-adel],[data-auto],[data-unlink],[data-insert],[data-view-go],[data-node]');
+  if(!b) return;
+  if(b.dataset.add){ openAddStop(b.dataset.add); return; }
+  if(b.dataset.auto){ const [pid,cid]=b.dataset.auto.split('>'); node(cid).parents[pid].minutes=null; toast('已改用公路路线时间'); render(); return; }
+  if(b.dataset.unlink){ const [pid,cid]=b.dataset.unlink.split('>'); unlink(pid,cid); render(); return; }
+  if(b.dataset.insert){ const [pid,cid]=b.dataset.insert.split('>'); if(node(pid)&&node(cid)) openAddStop(pid,cid); return; }
+  if(b.dataset.del){ deleteNode(b.dataset.del); render(); return; }
+  if(b.dataset.adopt){ state.activePath=b.dataset.adopt.split('>'); render(); return; }
+  if(b.dataset.goto){ state.currentPlaceId=b.dataset.goto; state.view='detail'; render(); return; }
+  if(b.dataset.splice){ spliceNode(b.dataset.splice); render(); return; }
+  if(b.dataset.decide){ const a=findAttr(b.dataset.decide); a.decision=b.dataset.val; render(); return; }
+  if(b.dataset.adel){ const p=place(state.currentPlaceId); p.attractions=p.attractions.filter(a=>a.id!==b.dataset.adel); render(); return; }
+  if(b.dataset.viewGo){ state.view=b.dataset.viewGo; render(); return; }
+  if(b.dataset.node){ if(t.closest('[data-stop]')) return; state.activePath=pathTo(b.dataset.node); render(); return; }
+});
+function findAttr(id){ for(const p of Object.values(state.places)){ const a=p.attractions.find(a=>a.id===id); if(a) return a; } }
+
+function applyField(t){   // write one edited field into the trip; returns 'num' (totals change, re-render on commit), 'text', or ''
+  const d=t.dataset, num=()=>Number(t.value)||0;
+  if(d.min){ const [pid,cid]=d.min.split('>'), e=node(cid)?.parents[pid]; if(e) e.minutes=t.value===''?null:Number(t.value); return 'num'; }
+  if(d.days){ place(d.days).days=num(); return 'num'; }
+  if(d.ahours){ findAttr(d.ahours).hours=num(); return 'num'; }
+  if(d.aticket){ findAttr(d.aticket).ticket=num(); return 'num'; }
+  if(d.hotel){ place(d.hotel).hotel=num(); return 'num'; }
+  if(d.food){ place(d.food).food=num(); return 'num'; }
+  if(d.note){ place(d.note).note=t.value; return 'text'; }
+  if(d.aname){ findAttr(d.aname).name=t.value; return 'text'; }
+  if(d.adesc){ findAttr(d.adesc).desc=t.value; return 'text'; }
+  if(t.id==='trip-title'){ state.title=t.value; return 'text'; }
+  return '';
+}
+// every keystroke goes into the trip and is saved a moment later, so refreshing right after typing loses nothing
+document.body.addEventListener('input',e=>{ if(applyField(e.target)) scheduleSave(); });
+document.body.addEventListener('change',e=>{
+  const t=e.target, d=t.dataset;
+  if(d.mode){ const [pid,cid]=d.mode.split('>'); node(cid).parents[pid].mode=t.value; render(); return; }
+  if(d.img){ readImg(t.files[0]).then(src=>{ findAttr(d.img).img=src; render(); }); return; }
+  if(t.id==='start-date'){ state.startDate=t.value; render(); return; }
+  if(t.id==='import-json'){ importJSON(t.files[0]); t.value=''; return; }
+  const kind=applyField(t); if(kind==='num') render(); else if(kind) scheduleSave();
+});
+// another tab saved a newer version: take it over quietly (keeping this tab's view) so closing this tab cannot overwrite it
+window.addEventListener('storage',e=>{ if(e.key!==LS_STATE||!booted||!e.newValue) return;
+  let s; try{ s=JSON.parse(e.newValue); }catch(_){ return; } if(!validState(s)||(s.savedAt||0)<=(state.savedAt||0)) return;
+  const view=state.view, cur=state.currentPlaceId;
+  try{ if(s._imagesElsewhere) restoreImages(s,state); s=migrate(s); }catch(_){ return; }
+  s.view=view; if(s.places[cur]) s.currentPlaceId=cur; state=s; fixActivePath(); lastSig=sigOf(state); saveInfo.at=state.savedAt||saveInfo.at; render(true); updateSaveStatus();
+});
+function readImg(file){ return new Promise(res=>{ if(!file) return res(null); const img=new Image(); const fr=new FileReader(); fr.onload=()=>{ img.onload=()=>{ const c=document.createElement('canvas'); const s=Math.min(1,1000/Math.max(img.width,img.height)); c.width=img.width*s; c.height=img.height*s; c.getContext('2d').drawImage(img,0,0,c.width,c.height); res(c.toDataURL('image/jpeg',.82)); }; img.src=fr.result; }; fr.readAsDataURL(file); }); }
+
+document.body.addEventListener('submit',e=>{
+  if(e.target.id!=='add-attr') return; e.preventDefault();
+  const p=place(state.currentPlaceId); const f=e.target;
+  const a={id:uid('a'),name:f.querySelector('#na-name').value.trim(),desc:f.querySelector('#na-desc').value.trim(),hours:Number(f.querySelector('#na-hours').value)||0,ticket:Number(f.querySelector('#na-ticket').value)||0,decision:'tbd',img:null};
+  if(!a.name) return;
+  readImg(f.querySelector('#na-img').files[0]).then(src=>{ a.img=src; p.attractions.push(a); toast('已添加景点'); render(); });
+});
+document.body.addEventListener('click',e=>{ const id=e.target.closest('button')?.id;
+  if(id==='btn-pdf'){ if(staticMap.busy||staticMap.key!==staticMapKey()){ staticMap.printWhenReady=true; toast('地图生成中，好了会自动打开打印'); buildStaticMap(); return; } try{ window.print(); }catch(_){ } }
+  else if(id==='btn-export') exportJSON();
+  else if(id==='btn-settings'||id==='save-status') openSettings();
+});
+
+/* ============ boot: load the newest saved copy (localStorage or IndexedDB), else the sample ============ */
+(async function boot(){
+  let lsRaw=null, lsState=null, lsSnaps=null, idbState=null, routes=null, idbSnaps=null;
+  try{ localStorage.setItem('waypoint.probe','1'); localStorage.removeItem('waypoint.probe'); saveInfo.lsAvail=true; }catch(_){}
+  try{ lsRaw=localStorage.getItem(LS_STATE); lsState=lsRaw?JSON.parse(lsRaw):null; }catch(_){}
+  try{ lsSnaps=JSON.parse(localStorage.getItem(LS_SNAPS)||'null'); }catch(_){}
+  try{ [idbState,routes,idbSnaps]=await withTimeout(Promise.all([DB.get('state'),DB.get('routes'),DB.get('snapshots')]),4000); saveInfo.idb='ok'; }catch(_){ saveInfo.idb='fail'; }
+  if(routes) Object.entries(routes).forEach(([k,v])=>{ if(v&&typeof v==='object') routeCache[k]=v; });
+  snaps=[idbSnaps,lsSnaps].filter(Array.isArray).sort((a,b)=>(b[0]?.t||0)-(a[0]?.t||0))[0]||[];
+  let seeded=false;   // first open of the test copy: start from the real trip
+  if(DEV&&!lsRaw&&!idbState){ const main=await readMainTrip(); if(main){ lsState=main; seeded=true; } }
+  const cands=[lsState,idbState].filter(validState).sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
+  let loaded=null;
+  for(const c of cands){ try{ const s=JSON.parse(JSON.stringify(c)); if(s._imagesElsewhere) restoreImages(s,idbState,lsState); loaded=migrate(s); break; }catch(e){ console.error('Waypoint: a saved copy could not be read',e); } }
+  if(loaded) state=loaded;
+  else if(lsRaw||idbState){   // something is stored but unreadable: set it aside instead of letting the sample overwrite it
+    try{ localStorage.setItem(NS+'.state.unreadable',lsRaw||JSON.stringify(idbState)); }catch(_){}
+    DB.set('state.unreadable',idbState||lsRaw).catch(()=>{});
+    setTimeout(()=>toast('之前保存的数据读不出来，已另存一份备份，先显示示例行程'),400);
+  }
+  fixActivePath();
+  // both copies identical: nothing to write until the next edit; otherwise write now so localStorage and IndexedDB agree again
+  lastSig=loaded&&lsState&&idbState&&lsState.savedAt===idbState.savedAt?sigOf(state):'';
+  saveInfo.at=loaded?.savedAt||0;
+  booted=true;
+  if(DEV){ document.body.classList.add('dev'); document.title='Waypoint 测试版'; document.querySelector('.brand small').textContent='路书 · 测试版'; }
+  if(seeded) setTimeout(()=>toast('测试版：已复制正式版的行程，这里的改动不会影响正式版'),400);
+  if(loaded&&!seeded&&Date.now()-(snaps[0]?.t||0)>SNAP_EVERY) takeSnapshot('打开时');
+  render(); requestPersist();
+})();
+</script>
+</body>
+</html>

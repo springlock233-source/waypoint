@@ -5,11 +5,13 @@ No build step, no backend.
 
 **Live:** https://springlock233-source.github.io/waypoint/ (GitHub Pages, updates on every push to `main`). Or open `index.html` locally.
 
+**Test copy:** https://springlock233-source.github.io/waypoint/dev/ serves `dev/index.html`. New features land there first. It stores its data under `waypoint-dev.*` names (localStorage keys and the IndexedDB database), so nothing done there touches the real trip. On first open it copies the real trip read-only; ⚙ 设置 → "从正式版重新复制行程" copies it again. When a change is approved, promote it with `cp dev/index.html index.html`. The same file works in both places because the storage names come from the URL path.
+
 Sample data: a 7-day National Day self-drive trip from Changsha through southern Hunan and northern Guangxi (1–7 Oct 2026).
 
 ## Views (keys 1–4)
 
-1. **路线树 Route Tree** – a mind-map of possible routes branching from the origin. Click a node to make the path from the root to that node the active plan. The side panel compares every complete route by nights, travel time, km, chosen / TBD attractions and budget. Branches can also **merge**: "＋ 分支 → 汇入已有站点" connects a stop to an existing later stop, so everything after it is shared instead of duplicated. Each incoming connection keeps its own travel mode and time, and every distinct start-to-end path still appears in the comparison.
+1. **路线树 Route Tree** – a mind-map of possible routes branching from the origin. Click a node to make the path from the root to that node the active plan. The side panel compares every complete route by nights, travel time, km, chosen / TBD attractions and budget. Branches can also **merge**: "＋ 分支 → 汇入已有站点" connects a stop to an existing later stop, so everything after it is shared instead of duplicated. Each incoming connection keeps its own travel mode and time, and every distinct start-to-end path still appears in the comparison. To **insert** a stop between two existing ones, click the time pill (with ＋) on the connection between them, or "＋ 在这两站之间插入站点" in the itinerary view; the stop after it keeps its travel mode and both legs are re-routed. *(test copy only for now)*
 2. **行程与地图 Itinerary & Map** – the active plan's stops and legs, a real map (Leaflet) with the routed roads drawn on it, and a per-stop time and money summary.
 3. **站点景点 Stop Detail** – attraction cards for one stop with photo upload, hours, ticket price and a go / TBD / skip decision. Hotel per night and food per day live in the side panel.
 4. **总结导出 Summary** – a print-styled itinerary sheet with a budget breakdown and a static map of the route (map tiles stitched on a canvas in the browser, so it prints as one image). "导出 PDF" calls the browser print dialog.
